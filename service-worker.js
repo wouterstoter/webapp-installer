@@ -42,6 +42,7 @@ self.addEventListener('message', e => {
 
 self.addEventListener('fetch', event => {
   console.log(event);
+  // Skip cross-origin requests, like those for Google Analytics.
   if (event.request.url.startsWith(self.location.origin)) {
     event.respondWith(
       caches.match(event.request, {ignoreSearch:true}).then(cachedResponse => {
@@ -51,4 +52,6 @@ self.addEventListener('fetch', event => {
       })
     );
   }
+  // Return regular response otherwise
+  return fetch(event.request)
 });

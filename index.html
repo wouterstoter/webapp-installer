@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>WebApp Installer</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<script src="jszip.min.js" type="text/javascript"></script>
+  </head>
+  <body>
+    <input type="file" accept=".zip, .webapp" style="display:none;"></input>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function() {
+          navigator.serviceWorker.register('service-worker.js',{scope: '.'}).then(function(registration) {
+            // Registration was successful
+            console.log('ServiceWorker registration successful with scope: ', registration.scope);
+            document.querySelector("input").style.display = "";
+          }, function(err) {
+            console.error('ServiceWorker registration failed: ', err);
+          });
+        });
+      }
+      
+      // Send the zip to the service worker whenever it is uploaded
+      document.querySelector("input").onchange = function() {
+        var file = document.querySelector('input[type="file"]').files[0];
+		
+        var name = file.name.split(".")
+        if (name.length > 1) name = name.slice(0,-1).join(".");
+        if (name.length == 0) throw new Error("Filename must be more than just the file-extension");
+        console.log(name);
+		
+        var reader = new FileReader();
+        reader.onload = function(e) {
+          JSZip.loadAsync(reader.result)
+          .then(zip => {
+            navigator.serviceWorker.ready.then(registration => {
+              var files = {};
+              var promises = [];
+              var total = 0;
+              var progress = 0;
+              for (var file in zip.files) {
+                total += zip.files[file]._data.uncompressedSize;
+                var promise = (f => {
+                  return zip.files[f].async("uint8array")
+                  .then(a => files[f] = a)
+                  .then(a => progress += zip.files[f]._data.uncompressedSize)
+                  .then(a => console.log(a, "of", total))
+                })(file);
+                promises.push(promise);
+              }
+              Promise.all(promises)
+              .then(() => {
+                console.log(files);
+                navigator.serviceWorker.controller.postMessage({action:"add",app:name,data:files});
+              });
+            });
+          });
+        };
+        reader.readAsBinaryString(file);
+      }
+      
+      window.onbeforeunload = function() {
+        navigator.serviceWorker.controller.postMessage("close");
+      }
+      
+      window.onmessage = (event) => {
+        try { 
+          var data = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+          if (!data.log) return
+          navigator.serviceWorker.ready.then(registration => {
+            navigator.serviceWorker.controller.postMessage(data);
+          });
+        } catch(e) {}
+      }
+    </script>
+  </body>
+</html>

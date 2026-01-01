@@ -48,10 +48,10 @@ self.addEventListener('fetch', event => {
       caches.match(event.request, {ignoreSearch:true}).then(cachedResponse => {
         if (cachedResponse) {
           return cachedResponse;
+        } else {
+          return fetch(event.request)
         }
       })
     );
   }
-  // Return regular response otherwise
-  return fetch(event.request)
 });

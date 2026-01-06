@@ -31,9 +31,9 @@ self.addEventListener('message', e => {
       for (var file in e.data.data) {
         if (file.endsWith("/")) {
           // Redirect to the index.html for directories
-          cache.put(new Request(e.data.app + "/" + file), Response.redirect(e.data.app + "/" + file + "index.html",302));
+          cache.put(e.data.app + "/" + file, Response.redirect(e.data.app + "/" + file + "index.html",302));
         } else {
-          cache.put(new Request(e.data.app + "/" + file), new Response(e.data.data[file]));
+          cache.put(e.data.app + "/" + file, new Response(e.data.data[file]));
         }
       }
     });

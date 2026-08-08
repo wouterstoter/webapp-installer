@@ -271,7 +271,7 @@ async function request(input, options) {
         }
         if (response) {
           var headers = new Headers(response.headers);
-          headers.set("Content-Security-Policy", "child-src 'self'; connect-src 'self' http: https:") // Prevent loading of external resources
+          headers.set("Content-Security-Policy", "child-src 'self'; connect-src 'self' http: https: blob:") // Prevent loading of external resources
           headers.set("Referrer-Policy", "origin-when-cross-origin") // Prevent sharing the referrer externally
           response = new Response(response.body,{status: response.status, statusText: response.statusText, headers: headers});
         }

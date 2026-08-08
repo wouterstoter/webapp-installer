@@ -13,6 +13,12 @@ const CACHE_URLS = [
   'fflate.mjs',
   'service-worker.js'
 ];
+const mimes = {
+  "html": "text/html",
+  "js": "text/javascript",
+  "css": "text/css",
+  "svg": "image/svg+xml"
+}
 
 self.addEventListener('install', event => {
   event.waitUntil(
@@ -269,14 +275,19 @@ async function request(input, options) {
         if (input.method == "HEAD") {
           response = new Response(null,{status: response.status, statusText: response.statusText, headers: response.headers});
         }
+        var headers;
         if (response) {
-          var headers = new Headers(response.headers);
+          headers = new Headers(response.headers);
           headers.set("Content-Security-Policy", "child-src 'self'; connect-src 'self' http: https: blob:") // Prevent loading of external resources
           headers.set("Referrer-Policy", "origin-when-cross-origin") // Prevent sharing the referrer externally
+          if (!headers.get("content-type")) {
+            var ext = Object.keys(mimes).find(ext => url.pathname.toLowerCase().endsWith("." + ext));
+            if (ext) headers.set("content-type", mimes[ext])
+          }
           response = new Response(response.body,{status: response.status, statusText: response.statusText, headers: headers});
         }
         // Replace URLs in document for relative URLs
-        if (response && (input.destination == "document" || input.destination == "")) {
+        if (response && (input.destination == "document" || [".html"].some(a => url.pathname.toLowerCase().endsWith(a)) || ["text/html"].includes(headers.get("content-type")?.split(";")[0].toLowerCase()))) {
           var bytes = bytes = new Uint8Array(await response.arrayBuffer());
           try {
             var decoder = new TextDecoder('utf-8', { fatal: true }); // Throws an error if not UTF-8 encoded, so the regular response can be used

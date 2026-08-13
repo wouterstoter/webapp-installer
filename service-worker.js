@@ -280,77 +280,7 @@ async function request(input, options, navigate=false) {
           responses = await cache.matchAll(new Request(index_url,input),{ignoreSearch: true, ignoreMethod: true, ignoreVary: true});
         }
         var response = responses[0];
-        if (response) {
-          var decompression = response.headers.get("Content-Encoding")
-          if (decompression) {
-            var body = response.body;
-            decompression = decompression.split(" ");
-            if (response.headers.has("X-Content-Encryption")) decompression.push("decrypt");
-            for (var i = 0; i < decompression.length; ++i) {
-              try {
-                if (decompression[i] == "zip" || decompression[i] == "zip64" || decompression[i] == "decrypt") {
-                  var inflateOptions = {passwordVerification: false, compressed: decompression[i] != "decrypt", useCompressionStream: true};
-                  if(response.headers.has("X-Content-Encryption")) inflateOptions.encrypted = true;
-                  switch (response.headers.get("X-Content-Encryption")) {
-                    case "zipCrypto":
-                      inflateOptions.zipCrypto = true;
-                      inflateOptions.encrypted = true;
-                      break;
-                    case "AES1":
-                    case "AES2":
-                    case "AES3":
-                      inflateOptions.encryptionStrength = Number(response.headers.get("X-Content-Encryption").slice(-1))
-                      inflateOptions.encrypted = true;
-                      break;
-                  }
-                  if (inflateOptions.encrypted && !password) return errorpage(401,app);
-                  if (response.headers.has("X-Content-Signature")) {
-                    inflateOptions.signed = true;
-                  }
-                  inflateOptions.signature = Number(response.headers.get("X-Content-Signature"));
-                  if (password) {
-                    inflateOptions.password = password;
-                  }
-                  inflateOptions.deflate64 = decompression[i] == "zip64";
-                  if (response.headers.has("Content-Length")) {
-                    inflateOptions.outputSize = Number(response.headers.get("Content-Length"));
-                  }
-                  var config = zip.getConfiguration();
-                  if (inflateOptions.encrypted) {
-                    //Check password
-                    var probe 
-                    [probe, body] = body.tee();
-                    try {
-                      probe = probe.pipeThrough(new zip.InflateStream(inflateOptions, config));
-                      const reader = probe.getReader();
-                      await reader.read(); // throws here if the password is wrong
-                      await reader.cancel(); // don't bother reading the rest
-                    } catch(e) {
-                      if (e.message == zip.ERR_INVALID_PASSWORD) return errorpage(401,app);
-                      console.error(e);
-                    }
-                  }
-                  body = body.pipeThrough(new zip.InflateStream(inflateOptions, config));
-                  while (decompression.indexOf("zip") != -1) decompression.splice(decompression.indexOf("zip"),1);
-                  while (decompression.indexOf("zip64") != -1) decompression.splice(decompression.indexOf("zip64"),1);
-                  while (decompression.indexOf("decrypt") != -1) decompression.splice(decompression.indexOf("decrypt"),1);
-                  i--;
-                } else {
-                  body = body.pipeThrough(new DecompressionStream(decompression[i]))
-                  decompression.splice(i,1);
-                  i--;
-                }
-              } catch(e) {console.warn(`Failed ${decompression[i]} decompression on ${url}. Serving compressed file.`,e)}
-            }
-            var headers = new Headers(response.headers)
-            if (decompression.length === 0) {
-              headers.delete("Content-Encoding")
-            } else {
-              headers.set("Content-Encoding",decompression.join(" "))
-            }
-            response = new Response(body,{headers: headers, status: response.status, statusText: response.statusText})
-          }
-        }
+        if (response) response = await deCrompressResponse(response,password,url);
         return response || errorpage(404,app);
         break;
       case "HEAD":
@@ -422,6 +352,8 @@ async function errorpage(status,app) {
   </script>`
   var body
   if (response) {
+    // Only process decompression if not encrypted for 501, since no password is known.
+    if (status != 501 || !response.headers.has("X-Content-Encryption")) response = await deCrompressResponse(response,null,url);
     body = new Uint8Array(await response.arrayBuffer());
     try {
       var decoder = new TextDecoder('utf-8', { fatal: true }); // Throws an error if not UTF-8 encoded, so the regular response can be used
@@ -438,4 +370,84 @@ async function errorpage(status,app) {
   headers.set("Content-Security-Policy", "child-src 'self'; connect-src 'self' http: https: blob:") // Prevent loading of external resources
   headers.set("Referrer-Policy", "origin-when-cross-origin") // Prevent sharing the referrer externally
   return new Response(body,{status: status, statusText: statusText, headers: headers})
+}
+
+/**
+ * Decrypt/decompress response
+ * @param {Response} response - The response to decrypt/decompress
+ * @param {string} [password] - The password to decrypt with
+ * @param {Response} [url] - The url, only needed for clear error logging
+ * @returns {Response} The decrypted/decompressed response
+ */
+async function deCrompressResponse(response,password,url) {
+  if (response.headers.has("Content-Encoding") || response.headers.has("X-Content-Encryption")) {
+    var body = response.body;
+    var decompression = response.headers.get("Content-Encoding").split(" ");
+    if (response.headers.has("X-Content-Encryption")) decompression.push("decrypt");
+    for (var i = 0; i < decompression.length; ++i) {
+      try {
+        if (decompression[i] == "zip" || decompression[i] == "zip64" || decompression[i] == "decrypt") {
+          var inflateOptions = {passwordVerification: false, compressed: decompression[i] != "decrypt", useCompressionStream: true};
+          if(response.headers.has("X-Content-Encryption")) inflateOptions.encrypted = true;
+          switch (response.headers.get("X-Content-Encryption")) {
+            case "zipCrypto":
+              inflateOptions.zipCrypto = true;
+              inflateOptions.encrypted = true;
+              break;
+            case "AES1":
+            case "AES2":
+            case "AES3":
+              inflateOptions.encryptionStrength = Number(response.headers.get("X-Content-Encryption").slice(-1))
+              inflateOptions.encrypted = true;
+              break;
+          }
+          if (inflateOptions.encrypted && !password) return errorpage(401,app);
+          if (response.headers.has("X-Content-Signature")) {
+            inflateOptions.signed = true;
+          }
+          inflateOptions.signature = Number(response.headers.get("X-Content-Signature"));
+          if (password) {
+            inflateOptions.password = password;
+          }
+          inflateOptions.deflate64 = decompression[i] == "zip64";
+          if (response.headers.has("Content-Length")) {
+            inflateOptions.outputSize = Number(response.headers.get("Content-Length"));
+          }
+          var config = zip.getConfiguration();
+          if (inflateOptions.encrypted) {
+            //Check password
+            var probe 
+            [probe, body] = body.tee();
+            try {
+              probe = probe.pipeThrough(new zip.InflateStream(inflateOptions, config));
+              const reader = probe.getReader();
+              await reader.read(); // throws here if the password is wrong
+              await reader.cancel(); // don't bother reading the rest
+            } catch(e) {
+              if (e.message == zip.ERR_INVALID_PASSWORD) return errorpage(401,app);
+              console.error(e);
+            }
+          }
+          body = body.pipeThrough(new zip.InflateStream(inflateOptions, config));
+          while (decompression.indexOf("zip") != -1) decompression.splice(decompression.indexOf("zip"),1);
+          while (decompression.indexOf("zip64") != -1) decompression.splice(decompression.indexOf("zip64"),1);
+          while (decompression.indexOf("decrypt") != -1) decompression.splice(decompression.indexOf("decrypt"),1);
+          i--;
+        } else {
+          body = body.pipeThrough(new DecompressionStream(decompression[i]))
+          decompression.splice(i,1);
+          i--;
+        }
+      } catch(e) {console.warn(`Failed ${decompression[i]} decompression on ${url}. Serving compressed file.`,e)}
+    }
+    var headers = new Headers(response.headers)
+    if (decompression.length === 0) {
+      headers.delete("Content-Encoding")
+    } else {
+      headers.set("Content-Encoding",decompression.join(" "))
+    }
+    return new Response(body,{headers: headers, status: response.status, statusText: response.statusText})
+  } else {
+    return response;
+  }
 }

@@ -29,34 +29,11 @@
           <div class="flex-grow-1">A new update for WebApp Installer is available</div>
           <button class="btn btn-primary" type="button">Update</button>
         </div>
-        <h1 class="text-body-emphasis">Add your own WebApps</h1>
-        <p class="fs-5 col-md-8">Open a .har, .zip, or .app file to add them as a WebApp. You can also open an uncompressed folder as an app.</p>
+        <h1 class="text-body-emphasis">500 Internal Server Error</h1>
+        <p class="fs-5 col-md-8">We're having some trouble...</p>
         <div class="mb-5">
-          <input id="openFile" type="file" accept=".zip, .har, .app" style="display:none;"/>
-          <label for="openFile" class="btn btn-primary btn-lg px-4">Open file</label>
-          <input id="openFolder" type="file" webkitdirectory directory multiple style="display:none;"/>
-          <label for="openFolder" class="btn btn-outline-primary btn-lg px-4">Open folder</label>
-          <script>
-            document.getElementById("openFile").onchange = function() {
-              var file = this.files[0];
-              if (!file) return;
-              navigator.serviceWorker.ready.then(async () => {
-                fetch(file.name, {
-                  method: 'PUT',
-                  headers:{
-                    "Last-Modified": new Date(file.lastModified).toUTCString(), 
-                    "Content-Type": file.type, 
-                    "Content-Length": file.size,
-                  },
-                  //body: await file.arrayBuffer().then(file => new Uint8Array(file))
-                  body: file.stream(),
-                  duplex: "half"
-                })
-              });
-            }
-          </script>
+          <a href="." class="btn btn-primary btn-lg px-4">Go home</a>
         </div>
-        <hr class="col-3 col-md-2 mb-5"/>
         <footer class="pt-5 my-5 text-body-secondary border-top">Created by Wouter Stoter · © 2026 </footer>
       </main>
     </div>

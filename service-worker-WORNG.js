@@ -175,15 +175,13 @@ function wURL(url,base) {
       url = url.slice(1)
       base = base.slice(1)
     }
-    var prefix = "";
+    var prefix;
     if (base.length > 1 && shared.length > 3) {
       prefix = "../".repeat(base.length - 1);
     } else if (base.length == 1 && shared.length > 3) {
       prefix = "./";
     } else if (shared.length > 3) {
       prefix = "";
-    } else if (shared.length == 2) {
-      prefix = "/"
     } else if (shared.length == 2) {
       prefix = "//"
     } else if (url[0] == "https:") (
@@ -288,36 +286,33 @@ async function request(input, options, navigate=false) {
           if (decompression) {
             var body = response.body;
             decompression = decompression.split(" ");
-            if (response.headers.has("X-Content-Encryption")) decompression.push("decrypt");
+            var headers = new Headers(response.headers);
             for (i = 0; i < decompression.length; ++i) {
               try {
-                if (decompression[i] == "zip" || decompression[i] == "zip64" || decompression[i] == "decrypt") {
-                  var inflateOptions = {passwordVerification: false, compressed: decompression[i] != "decrypt", useCompressionStream: true};
-                  if(response.headers.has("X-Content-Encryption")) inflateOptions.encrypted = true;
+                if (decompression[i] == "zip0" || decompression[i] == "zip8") {
+                  var writeOptions = {passThrough: true};
+                  if(response.headers.has("X-Content-Encryption")) writeOptions.encrypted = true;
                   switch (response.headers.get("X-Content-Encryption")) {
                     case "zipCrypto":
-                      inflateOptions.zipCrypto = true;
-                      inflateOptions.encrypted = true;
+                      writeOptions.zipCrypto = true;
                       break;
                     case "AES1":
                     case "AES2":
                     case "AES3":
-                      inflateOptions.encryptionStrength = Number(response.headers.get("X-Content-Encryption").slice(-1))
-                      inflateOptions.encrypted = true;
+                      writeOptions.encryptionStrength = Number(response.headers.get("X-Content-Encryption").slice(-1))
                       break;
                   }
-                  if (inflateOptions.encrypted && !password) return errorpage(401,app);
-                  if (response.headers.has("X-Content-Signature")) {
-                    inflateOptions.signed = true;
-                  }
-                  inflateOptions.signature = Number(response.headers.get("X-Content-Signature"));
-                  if (password) {
-                    inflateOptions.password = password;
-                  }
-                  inflateOptions.deflate64 = decompression[i] == "zip64";
-                  if (response.headers.has("Content-Length")) {
-                    inflateOptions.outputSize = Number(response.headers.get("Content-Length"));
-                  }
+                  if (writeOptions.encrypted && !password) return errorpage(401,app);
+                  writeOptions.uncompressedSize = Number(response.headers.get("Content-Length"));
+
+                  headers.delete("X-Content-Encryption");
+                  body = await jszipStream(body,writeOptions,{password: password}).catch(e => {
+                    //if (e.message == zip.ERR_INVALID_PASSWORD) 
+                    console.error(e);
+                    return errorpage(401,app);
+                  });
+
+                  /*
                   var config = zip.getConfiguration();
                   console.log(zip.InflateStream)
                   if (inflateOptions.encrypted) {
@@ -337,16 +332,16 @@ async function request(input, options, navigate=false) {
                   body = body.pipeThrough(new zip.InflateStream(inflateOptions, config));
                   while (decompression.indexOf("zip") != -1) decompression.splice(decompression.indexOf("zip"),1);
                   while (decompression.indexOf("zip64") != -1) decompression.splice(decompression.indexOf("zip64"),1);
-                  while (decompression.indexOf("decrypt") != -1) decompression.splice(decompression.indexOf("decrypt"),1);
-                  i--;
+                  while (decompression.indexOf("decrypt") != -1) decompression.splice(decompression.indexOf("decrypt"),1);*/
                 } else {
                   body = body.pipeThrough(new DecompressionStream(decompression[i]))
-                  decompression.splice(i,1);
-                  i--;
                 }
-              } catch(e) {console.warn(`Failed ${decompression[i]} decompression on ${url}. Serving compressed file.`,e)}
+                decompression.splice(i,1);
+                i--;
+              } catch(e) {
+                console.warn(`Failed ${decompression[i]} decompression on ${url}. Serving compressed file.`,e)
+              }
             }
-            var headers = new Headers(response.headers)
             if (decompression.length === 0) {
               headers.delete("Content-Encoding")
             } else {
@@ -376,10 +371,10 @@ async function request(input, options, navigate=false) {
             if (entry.creationDate) headers.set("Date",entry.creationDate.toUTCString());
             if (entry.uncompressedSize) headers.set("Content-Length",entry.uncompressedSize);
             //headers.set("Content-Type",zip.getMimeType(entry.filename.split(".").slice(-1)[0]));
-            if (entry.compressionMethod === 8) headers.set("Content-Encoding",entry.zip64 ? "zip64" : "zip");
-            if (entry.signature) headers.set("X-Content-Signature",entry.signature);
-            if (entry.encrypted) headers.set("X-Content-Encryption",entry.zipCrypto ? "zipCrypto" : "AES" + entry.extraFieldAES.strength);
-            console.log(entry,headers);
+            if (entry.compressed || entry.encrypted) {
+              headers.set("Content-Encoding","zip" + entry.compressionMethod);
+              if (entry.encrypted) headers.set("X-Content-Encryption",entry.zipCrypto ? "zipCrypto" : "AES" + entry.extraFieldAES.strength);
+            }
             var dataStream = new TransformStream();
             var response = new Response(dataStream.readable,{headers: headers});
             return Promise.all([
@@ -450,3 +445,52 @@ async function errorpage(status,app) {
   headers.set("Referrer-Policy", "origin-when-cross-origin") // Prevent sharing the referrer externally
   return new Response(body,{status: status, statusText: statusText, headers: headers})
 }
+/**
+ * Get the error page of the app
+ * @param {ReadableStream} inputStream - The stream you start with
+ * @param {ZipWriterAddDataOptions} [writeOptions] - https://gildas-lormeau.github.io/zip.js/api/interfaces/ZipWriterAddDataOptions.html
+ * @param {ZipReaderConstructorOptions} [readOptions] - https://gildas-lormeau.github.io/zip.js/api/classes/ZipReaderStream.html
+ * @returns {ReadableStream} outputStream - The stream you end with
+ * @returns {ZipWriterAddDataOptions} writeOptions - The write options to start the next one
+ */
+async function jszipStream(inputStream,writeOptions,readOptions) {
+  const writerStream = new zip.ZipWriterStream();
+  const readerStream = new zip.ZipReaderStream(readOptions);
+
+  writerStream.readable.pipeTo(readerStream.writable);
+
+  writerStream.zipWriter.add("file", inputStream, writeOptions)
+    .then(() => writerStream.close())
+    .catch(err => console.error("Failed to write:", err));
+
+  const reader = readerStream.readable.getReader();
+  const { value: entry } = await reader.read();
+
+  var outputStream = entry.readable;
+  if (entry.encrypted && readOptions.password) {
+    // Check password
+    var probe;
+    [probe,outputStream] = outputStream.tee();
+    const probeReader = probe.getReader();
+    try {
+      await probeReader.read();
+    } finally {
+      await probeReader.cancel().catch(() => {});
+    }
+  }
+  return outputStream;
+  return entry.readable
+  return [ entry.readable , {
+    passThrough: true,
+    uncompressedSize: entry.uncompressedSize,
+    encrypted: entry.encrypted,
+    zipCrypto: entry.zipCrypto,
+    encryptionStrength: entry.extraFieldAES.strength,
+    compressionMethod: entry.compressionMethod,
+    signature: entry.signature
+  } ]
+}/*
+var inputStream = new Blob(["Hello world!"]).stream()
+var [ middleStream, writerOptions ] = await jszipStream(inputStream,{password:"test",compressionMethod:0},{passThrough: true})
+var [ outputStream, writerOptions2 ] = await jszipStream(middleStream, writerOptions,{password:"test"})
+await new Response(outputStream).text()*/

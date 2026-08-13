@@ -4,7 +4,7 @@
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1"/>
     <title>WebApp Installer</title>
-    <link href="libs/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous"/>
+    <link href="libs/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous"/>
     <link rel="stylesheet" href="libs/bootstrap-icons.min.css"/>
     <style>
       #updateAlert {
@@ -48,9 +48,7 @@
                     "Content-Type": file.type, 
                     "Content-Length": file.size,
                   },
-                  //body: await file.arrayBuffer().then(file => new Uint8Array(file))
-                  body: file.stream(),
-                  duplex: "half"
+                  body: file
                 })
               });
             }
@@ -98,6 +96,6 @@
         });
       }
     </script>
-    <script src="libs/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"/>
+    <script src="libs/bootstrap.bundle.min.js" crossorigin="anonymous"/>
   </body>
 </html>

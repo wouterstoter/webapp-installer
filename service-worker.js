@@ -1,10 +1,8 @@
-importScripts("./libs/zip.js")
-if (typeof TransformStream == "undefined") {
-  script.src = "./libs/web-streams-polyfill.min.js";
-}
+import mime from './libs/mime.min.js';
+import "./libs/zip.js";
 
 const CACHE_BASE = 'webapp-installer-';
-const CACHE = CACHE_BASE + '2026-08-09-6';
+const CACHE = CACHE_BASE + '2026-08-13';
 const BASE = new URL(".",self.location.href);
 const APP_EXTS = ["zip","har","app"]
 
@@ -25,7 +23,7 @@ const CACHE_URLS = [
   'libs/bootstrap.min.css',
   'libs/bootstrap-icons.min.css',
   'libs/zip.js',
-  'libs/web-streams-polyfill.min.js',
+  'libs/mime.min.js',
   'libs/fonts/bootstrap-icons.woff',
   'libs/fonts/bootstrap-icons.woff2',
   '404.html',
@@ -111,7 +109,6 @@ self.addEventListener('activate', function(event) {
 
 self.addEventListener('fetch', event => {
   var r = event.request;
-  console.log(event);
   var referrer = r.referrer ? new URL(r.referrer) : ""
   event.respondWith(
     // Get client if the referrer is just the host, otherwise, empty promise
@@ -123,7 +120,7 @@ self.addEventListener('fetch', event => {
       var url = wURL(r.url,referrer);
       if (url != r.url && (r.method == "GET" || r.method == "HEAD")) return Response.redirect(url,302);
 
-      navigate = r.mode == "navigate";
+      var navigate = r.mode == "navigate";
       if (referrer != r.referrer) {
         r = new Request(r, {referrer: client.url})
       }
@@ -166,7 +163,7 @@ function wURL(url,base) {
     }
     url = url.split("/");
     base = base.split("/");
-    shared = [];
+    var shared = [];
     // store auth seperately
     if (base[2].split("@").length == 2) [ auth, base[2] ] = base[2].split("@");
     if (url[2].split("@").length == 2) [ auth, url[2] ] = url[2].split("@");
@@ -289,7 +286,7 @@ async function request(input, options, navigate=false) {
             var body = response.body;
             decompression = decompression.split(" ");
             if (response.headers.has("X-Content-Encryption")) decompression.push("decrypt");
-            for (i = 0; i < decompression.length; ++i) {
+            for (var i = 0; i < decompression.length; ++i) {
               try {
                 if (decompression[i] == "zip" || decompression[i] == "zip64" || decompression[i] == "decrypt") {
                   var inflateOptions = {passwordVerification: false, compressed: decompression[i] != "decrypt", useCompressionStream: true};
@@ -319,7 +316,6 @@ async function request(input, options, navigate=false) {
                     inflateOptions.outputSize = Number(response.headers.get("Content-Length"));
                   }
                   var config = zip.getConfiguration();
-                  console.log(zip.InflateStream)
                   if (inflateOptions.encrypted) {
                     //Check password
                     var probe 
@@ -331,7 +327,7 @@ async function request(input, options, navigate=false) {
                       await reader.cancel(); // don't bother reading the rest
                     } catch(e) {
                       if (e.message == zip.ERR_INVALID_PASSWORD) return errorpage(401,app);
-                      console.log(e);
+                      console.error(e);
                     }
                   }
                   body = body.pipeThrough(new zip.InflateStream(inflateOptions, config));
@@ -374,7 +370,7 @@ async function request(input, options, navigate=false) {
             if (entry.lastModDate) headers.set("Last-Modified",entry.lastModDate.toUTCString());
             if (entry.creationDate) headers.set("Date",entry.creationDate.toUTCString());
             if (entry.uncompressedSize) headers.set("Content-Length",entry.uncompressedSize);
-            //headers.set("Content-Type",zip.getMimeType(entry.filename.split(".").slice(-1)[0]));
+            headers.set("Content-Type",mime.getType(entry.filename));
             if (entry.compressionMethod === 8) headers.set("Content-Encoding",entry.zip64 ? "zip64" : "zip");
             if (entry.signature) headers.set("X-Content-Signature",entry.signature);
             if (entry.encrypted) headers.set("X-Content-Encryption",entry.zipCrypto ? "zipCrypto" : "AES" + entry.extraFieldAES.strength);

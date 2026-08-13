@@ -69,7 +69,7 @@
         };
       }
       if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('service-worker.js',{scope: '.'})
+        navigator.serviceWorker.register('service-worker.js',{scope: '.',type:"module"})
         .then((registration) => {
           console.log('ServiceWorker registration successful with scope: ', registration.scope);
           // An update is already waiting when the page loads

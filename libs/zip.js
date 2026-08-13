@@ -1952,7 +1952,6 @@
 
 	class InflateStream extends TransformStream {
 		constructor(options, { chunkSize, DecompressionStreamZlib, DecompressionStream }) {
-			console.log("InflateStram",options, {chunkSize: chunkSize, DecompressionStreamZlib: DecompressionStreamZlib, DecompressionStream: DecompressionStream})
 			super({});
 			const { zipCrypto, encrypted, signed, signature, compressed, useCompressionStream, deflate64, format } = options;
 			let crc32Stream, decryptionStream;

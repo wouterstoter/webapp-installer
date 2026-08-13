@@ -362,15 +362,14 @@ async function request(input, options, navigate=false) {
         return new Response(null,{status: response.status, statusText: response.statusText, headers: response.headers});
       case "PUT":
         if (url.pathname.endsWith(".zip") || url.pathname.endsWith(".app")) {
-          cache.put(new Request(url.href),new Response(null,{status:200,headers:input.headers}))
+          cache.put(new Request(url.href,{headers:input.headers}),new Response(null,{status:200,headers:input.headers}));
           var new_app = url.pathname.slice(BASE.pathname.length);
           var exists = await caches.delete(new_app);
           var new_cache = await caches.open(new_app);
-          const zipFileReader  = new zip.BlobReader(await input.blob());
-          const zipReader = new zip.ZipReader(zipFileReader);
-          const entries = await zipReader.getEntries();
-          var promises = entries.map(entry => {
-            if (entry.directory) return;
+          const zipReader = new zip.ZipReaderStream({passThrough: true});
+          const zipStream = input.body || (await input.blob()).stream();
+          for await (const entry of (zipStream.pipeThrough(zipReader))) {
+            if (entry.directory) continue;
             var headers = new Headers();
             if (entry.lastModDate) headers.set("Last-Modified",entry.lastModDate.toUTCString());
             if (entry.creationDate) headers.set("Date",entry.creationDate.toUTCString());
@@ -379,16 +378,10 @@ async function request(input, options, navigate=false) {
             if (entry.compressionMethod === 8) headers.set("Content-Encoding",entry.zip64 ? "zip64" : "zip");
             if (entry.signature) headers.set("X-Content-Signature",entry.signature);
             if (entry.encrypted) headers.set("X-Content-Encryption",entry.zipCrypto ? "zipCrypto" : "AES" + entry.extraFieldAES.strength);
-            console.log(entry,headers);
-            var dataStream = new TransformStream();
-            var response = new Response(dataStream.readable,{headers: headers});
-            return Promise.all([
-              entry.getData(dataStream.writable,{passThrough: true}),
-              new_cache.put(BASE + new_app + "/" + entry.filename, response)
-            ]);
-          });
-          await Promise.all(promises);
-          await zipReader.close();
+            var response = new Response(entry.readable,{headers: headers});
+            await new_cache.put(BASE + new_app + "/" + entry.filename, response)
+          }
+          //await zipReader.close();
           if (exists) return new Response(null,{status:200,statusText:"OK",headers:{Location:url.href}})
           return new Response(null,{status:201,statusText:"Created",headers:{Location:url.href}})
         }

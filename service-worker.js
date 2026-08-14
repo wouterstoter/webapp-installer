@@ -288,6 +288,8 @@ async function request(input, options, navigate=false) {
           headers.set("Content-Type","application/zip");
           var response = new Response(zipper.readable,{headers})
           var promises = files.map(f => {
+            // Skip files and folders whose name starts with .
+            if (("/" + f.url.slice((BASE + zippath).length)).split("#")[0].split("?")[0].indexOf("/.") != -1) return
             return cache.match(f)
             .then(response => {
               var body = response.body;
@@ -344,6 +346,7 @@ async function request(input, options, navigate=false) {
           const zipStream = input.body || (await input.blob()).stream();
           for await (const entry of (zipStream.pipeThrough(zipReader))) {
             if (entry.directory) continue;
+            if (entry.filename.startsWith(".") || entry.filename.indexOf("/.") != -1) continue
             var headers = new Headers();
             headers.set("Last-Modified",(entry.lastModDate || new Date()).toUTCString());
             headers.set("Date",(entry.creationDate || new Date()).toUTCString());

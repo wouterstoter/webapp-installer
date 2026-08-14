@@ -257,7 +257,8 @@ async function request(input, options, navigate=false) {
     }
 
     app = url.pathname.slice(BASE.pathname.length).split(AppExtRegEx).slice(0,-1);
-    var cache = await caches.open(app.join("/") || CACHE);
+    var cache = await caches.has(app.join("/") || CACHE);
+    if (cache) cache = await caches.open(app.join("/") || CACHE);
     if (!cache && !navigate) return errorpage(404);
     while (!cache) {
       // If the whole app cannot be found, give the 404 page of the parent app that can be found
@@ -267,20 +268,67 @@ async function request(input, options, navigate=false) {
     }
 
     switch (input.method) {
+      case "HEAD":
       case "GET":
         var responses = await cache.matchAll(input,{ignoreSearch: true, ignoreMethod: true, ignoreVary: true})
+        if (url.pathname.toLowerCase().endsWith(".zip")) {
+          var zippath = url.pathname.slice(BASE.pathname.length);
+          var files;
+          if (await caches.has(zippath)) {
+            cache = await caches.open(zippath);
+            files = await cache.keys();
+            zippath += "/";
+          } else {
+            zippath = zippath.slice(0,-4) + "/";
+            files = (await cache.keys()).filter(r => r.url.startsWith(BASE + zippath));
+            if (files.length == 0) return errorpage(404,app);
+          }
+          const zipper = new zip.ZipWriterStream();
+          var headers = new Headers(responses[0]?.headers);
+          headers.set("Content-Type","application/zip");
+          var response = new Response(zipper.readable,{headers})
+          var promises = files.map(f => {
+            return cache.match(f)
+            .then(response => {
+              var body = response.body;
+              var encoding = response.headers.get("Content-Encoding")?.split(" ") || [];
+              for (var i = 0; i < encoding.length; ++i) {
+                if (encoding[i] == "zip" || encoding[0] == "zip64") break;
+                body = body.pipeThrough(new DecompressionStream(encoding[i]))
+                encoding.splice(i,1);
+                i--;
+              }
+              var options = {
+                passThrough:true,
+                uncompressedSize: Number(response.headers.get("Content-Length")) || undefined,
+                encrypted: response.headers.has("X-Content-Encryption"),
+                compressionMethod: encoding.indexOf("zip") == -1 && encoding.indexOf("zip64") == -1 ? 0 : 8,
+                zip64: encoding.indexOf("zip64") != -1,
+                signature: Number(response.headers.get("X-Content-Signature")) || undefined,
+                zipCrypto: response.headers.get("X-Content-Encryption") == "zipCrypto",
+                encryptionStrength: Number(response.headers.get("X-Content-Encryption")?.replace("AES","")) || undefined,
+                lastModDate: new Date(response.headers.get("Last-Modified") || new Date()),
+                creationDate: new Date(response.headers.get("Date") || new Date()),
+              }
+              body.pipeTo(zipper.writable(f.url.slice((BASE + zippath).length),options));
+            });
+          });
+          await Promise.all(promises);
+          zipper.close();
+          return response;
+        }
         if (responses.length == 0 && url.pathname.endsWith("/")) {
           // Folder
           var index_url = new URL(url)
           index_url.pathname += "index.html";
           responses = await cache.matchAll(new Request(index_url,input),{ignoreSearch: true, ignoreMethod: true, ignoreVary: true});
-        } else if (responses.length == 0 && !url.pathname.endsWith(".html")) {
+        } else if (responses.length == 0 && !url.pathname.toLowerCase().endsWith(".html")) {
           var index_url = new URL(url)
           index_url.pathname += ".html";
           responses = await cache.matchAll(new Request(index_url,input),{ignoreSearch: true, ignoreMethod: true, ignoreVary: true});
         }
         var response = responses[0];
-        if (response) response = await deCrompressResponse(response,password,url);
+        if (response) response = await deCrompressResponse(response,password,url,app);
         return response || errorpage(404,app);
         break;
       case "HEAD":
@@ -297,8 +345,8 @@ async function request(input, options, navigate=false) {
           for await (const entry of (zipStream.pipeThrough(zipReader))) {
             if (entry.directory) continue;
             var headers = new Headers();
-            if (entry.lastModDate) headers.set("Last-Modified",entry.lastModDate.toUTCString());
-            if (entry.creationDate) headers.set("Date",entry.creationDate.toUTCString());
+            headers.set("Last-Modified",(entry.lastModDate || new Date()).toUTCString());
+            headers.set("Date",(entry.creationDate || new Date()).toUTCString());
             if (entry.uncompressedSize) headers.set("Content-Length",entry.uncompressedSize);
             headers.set("Content-Type",mime.getType(entry.filename));
             if (entry.compressionMethod === 8) headers.set("Content-Encoding",entry.zip64 ? "zip64" : "zip");
@@ -307,7 +355,6 @@ async function request(input, options, navigate=false) {
             var response = new Response(entry.readable,{headers: headers});
             await new_cache.put(BASE + new_app + "/" + entry.filename, response)
           }
-          //await zipReader.close();
           if (exists) return new Response(null,{status:200,statusText:"OK",headers:{Location:url.href}})
           return new Response(null,{status:201,statusText:"Created",headers:{Location:url.href}})
         }
@@ -358,11 +405,10 @@ async function errorpage(status,app) {
     try {
       var decoder = new TextDecoder('utf-8', { fatal: true }); // Throws an error if not UTF-8 encoded, so the regular response can be used
       var text = decoder.decode(body);
-      var html = (new DOMParser()).parseFromString(text, 'text/html');
-      html.head.innerHTML += `<base href="${encodeURI(url)}"/></head>`;
-      if (status = 401) html.body.innerHTML += authscript
-      body = '<!DOCTYPE html>' + html.documentElement.outerHTML;
-    } catch(e) {}
+      text = text.replace(/<head[^>]*>/i,`$&<base href="${encodeURI(url)}"/>`);
+      if (status == 401) text = text.replace(/<\/body>/i,authscript + '$&');
+      body = text;
+    } catch(e) {console.log(e)}
   }
   if (status == 401 && !body) body = `<!DOCTYPE html><html><head>${authscript}</head><body></body></html>`;
   var headers = new Headers(response?.headers);
@@ -377,9 +423,10 @@ async function errorpage(status,app) {
  * @param {Response} response - The response to decrypt/decompress
  * @param {string} [password] - The password to decrypt with
  * @param {Response} [url] - The url, only needed for clear error logging
+ * @param {Response} [app] - The app, only needed to serve the right error page
  * @returns {Response} The decrypted/decompressed response
  */
-async function deCrompressResponse(response,password,url) {
+async function deCrompressResponse(response,password,url,app) {
   if (response.headers.has("Content-Encoding") || response.headers.has("X-Content-Encryption")) {
     var body = response.body;
     var decompression = response.headers.get("Content-Encoding").split(" ");

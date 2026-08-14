@@ -5489,7 +5489,8 @@
 			this.pendingAddFileCalls = new Set();
 		}
 
-		transform(path) {
+		// EDIT BY WOUTER: Allow adding options while streaming add
+		transform(path, options) {
 			const zipWriter = this.zipWriter;
 			let streamController;
 			const { readable, writable } = new TransformStream({
@@ -5498,7 +5499,7 @@
 				},
 				flush: () => void closeArchive()
 			});
-			watchAddFileCall(this, this.zipWriter.add(path, readable), error => streamController.error(error));
+			watchAddFileCall(this, this.zipWriter.add(path, readable, options), error => streamController.error(error));
 			return { readable: this.readable, writable };
 
 			async function closeArchive() {
@@ -5514,14 +5515,15 @@
 			}
 		}
 
-		writable(path) {
+		// EDIT BY WOUTER: Allow adding options while streaming add
+		writable(path, options) {
 			let streamController;
 			const { readable, writable } = new TransformStream({
 				start(controller) {
 					streamController = controller;
 				}
 			});
-			watchAddFileCall(this, this.zipWriter.add(path, readable), error => streamController.error(error));
+			watchAddFileCall(this, this.zipWriter.add(path, readable, options), error => streamController.error(error));
 			return writable;
 		}
 
@@ -7932,7 +7934,7 @@
 	exports.resetConfiguration = resetConfiguration;
 	exports.terminateWorkers = terminateWorkersAndModule;
 	exports.unregisterCodec = unregisterCodec;
-	// Allow decryption and encryption afterwards (eddited by Wouter Stoter)
+	// EDIT BY WOUTER: Allow decryption and encryption afterwards
 	exports.ZipCryptoDecryptionStream = ZipCryptoDecryptionStream;
 	exports.ZipCryptoEncryptionStream = ZipCryptoEncryptionStream;
 	exports.AESDecryptionStream = AESDecryptionStream;

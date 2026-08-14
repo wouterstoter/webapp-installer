@@ -83,7 +83,8 @@ self.addEventListener('activate', function(event) {
         (typeof a === "string" && URL.canParse(a))
       ) {
         const url = (a.url || a).split("/");
-        const [auth, host] = url[2].split("@");
+        var [auth, host] = url[2].split("@");
+        if (!host) [auth, host] = [host, auth];
 
         url[2] = host;
         a = url.join("/");
@@ -298,7 +299,7 @@ async function request(input, options, navigate=false) {
               var body = response.body;
               var encoding = response.headers.get("Content-Encoding")?.split(" ") || [];
               for (var i = 0; i < encoding.length; ++i) {
-                if (encoding[i] == "zip" || encoding[0] == "zip64") break;
+                if (encoding[i] == "zip" || encoding[i] == "zip64") break;
                 body = body.pipeThrough(new DecompressionStream(encoding[i]))
                 encoding.splice(i,1);
                 i--;
@@ -393,7 +394,7 @@ async function request(input, options, navigate=false) {
         return new Response(null,{status: response.status, statusText: response.statusText, headers: response.headers});
       case "PUT":
         if (url.pathname.endsWith(".zip") || url.pathname.endsWith(".app")) {
-          cache.put(new Request(url.href,{headers:input.headers}),new Response(null,{status:200,headers:input.headers}));
+          cache.put(new Request(url,{headers:input.headers}),new Response(null,{status:200,headers:input.headers}));
           var new_app = url.pathname.slice(BASE.pathname.length);
           var exists = await caches.delete(new_app);
           var new_cache = await caches.open(new_app);
@@ -406,6 +407,62 @@ async function request(input, options, navigate=false) {
             var response = new Response(entry.readable,{headers});
             await new_cache.put(BASE + new_app + "/" + entry.filename, response)
           }
+          if (exists) return new Response(null,{status:200,statusText:"OK",headers:{Location:url.href}})
+          return new Response(null,{status:201,statusText:"Created",headers:{Location:url.href}})
+        } else {
+          var exists = await cache.delete(new Request(url,{method:"GET"})); // Delete the file if it already exists
+          // Handle redirects
+          var res;
+          var redirectURL = input.headers.get("Location");
+          if (redirectURL) {
+            redirectURL = wURL(redirectURL,url);
+            if (url != redirectURL) res = Response.redirect(redirectURL)
+          }
+          // Handle regular puts
+          if (!res) {
+            var body = input.body || (await input.blob()).steam();
+            var passThrough = !!Number(input.headers.get("X-Pass-Through"));
+            var headers;
+            if (!passThrough && (input.headers.has("Content-Encoding") || password)) {
+              var encoding = input.headers.get("Content-Encoding").toLowerCase().split(" ");
+              if (password) encoding.unshift("encrypt")
+              for (var i = 0; i < encoding.length; ++i) {
+                try {
+                  if (encoding[i] == "zip" || encoding[i] == "zip64" || encoding[i] == "encrypt") {
+                    var options = {
+                      compressionMethod: encoding.indexOf("zip") != -1 || encoding.indexOf("zip64") != -1 ? 8 : 0,
+                      password: password
+                    }
+                    const zipReader = new zip.ZipReaderStream({passThrough: true});
+                    const zipStream = body.pipeThrough(new zip.ZipWriterStream().transform('file',options));
+                    for await (const entry of (zipStream.pipeThrough(zipReader))) {
+                      var headers = entryToHeaders(entry,input.headers);
+                      console.log(entry,headers);
+                      body = entry.readable;
+                    }
+                    headers.delete("Authentication"); // Make sure the password isn't stored in the headers
+
+                    while (encoding.indexOf("zip") != -1) encoding.splice(encoding.indexOf("zip"),1);
+                    while (encoding.indexOf("zip64") != -1) encoding.splice(encoding.indexOf("zip64"),1);
+                    while (encoding.indexOf("decrypt") != -1) encoding.splice(encoding.indexOf("decrypt"),1);
+                    encoding.splice(i,0,headers.get("Content-Encoding"));
+                  } else {
+                    body = body.pipeThrough(new CompressionStream(encoding[i]))
+                  }
+                } catch(e) {
+                  // Remove encoding from array if encoding didn't succeed
+                  encoding.splice(i,1);
+                  i--;
+                  console.error(e);
+                }
+              }
+              headers = headers || new Headers(input.headers);
+              headers.set("Content-Encoding",encoding.join(" "));
+            }
+            res = new Response(body,{headers:headers || input.headers})
+          }
+          await cache.put(new Request(url,{method:"GET"}), res)
+          // Send responses
           if (exists) return new Response(null,{status:200,statusText:"OK",headers:{Location:url.href}})
           return new Response(null,{status:201,statusText:"Created",headers:{Location:url.href}})
         }
@@ -480,7 +537,7 @@ async function errorpage(status,app) {
 async function deCrompressResponse(response,password,url,app) {
   if (response.headers.has("Content-Encoding") || response.headers.has("X-Content-Encryption")) {
     var body = response.body;
-    var decompression = response.headers.get("Content-Encoding").split(" ");
+    var decompression = response.headers.get("Content-Encoding").split(" ").reverse(); // reverse so the last applied gets removed first
     if (response.headers.has("X-Content-Encryption")) decompression.push("decrypt");
     for (var i = 0; i < decompression.length; ++i) {
       try {
@@ -516,16 +573,22 @@ async function deCrompressResponse(response,password,url,app) {
       } catch(e) {console.warn(`Failed ${decompression[i]} decompression on ${url}. Serving compressed file.`,e)}
     }
     var headers = new Headers(response.headers)
+    if (decompression.indexOf("decrypt") == -1) {
+      headers.delete("X-Content-Encryption")
+    } else {
+      decompression.splice(decompression.indexOf("decrypt"),1);
+    }
     if (decompression.length === 0) {
       headers.delete("Content-Encoding")
     } else {
-      headers.set("Content-Encoding",decompression.join(" "))
+      headers.set("Content-Encoding",decompression.reverse().join(" "))
     }
     return new Response(body,{headers: headers, status: response.status, statusText: response.statusText})
   } else {
     return response;
   }
 }
+// TODO: Make actually work for Zip64 / figure out what the 'format' attribute in InflateStream should be.
 
 /**
  * Create a readable stream from a generator
@@ -586,7 +649,8 @@ function headersToOptions(headers) {
     zip64: encoding.indexOf("zip64") != -1, // ZipWriter Only
     deflate64: encoding.indexOf("zip64") != -1,
     signed: headers.has("X-Content-Signature"), // Inflate Only
-    signature: Number(headers.get("X-Content-Signature")) || undefined,
+    signature: Number(headers.get("X-Content-Signature")) || undefined, // Deprecated
+    crc32: Number(headers.get("X-Content-Signature")) || undefined, // New signature
     zipCrypto: headers.get("X-Content-Encryption") == "zipCrypto",
     encryptionStrength: Number(headers.get("X-Content-Encryption")?.replace("AES","")) || undefined,
     lastModDate: new Date(headers.get("Last-Modified") || new Date()), // ZipWriter Only

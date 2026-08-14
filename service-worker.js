@@ -132,6 +132,9 @@ self.addEventListener('fetch', event => {
 });
 
 self.addEventListener('message', (event) => {
+  var url = event.source.url.split('#')[0].split("?")[0];
+  var app = url.slice(BASE.href.length).split(AppExtRegEx)
+  if (app.length > 1) return;
   if (event.data === 'SKIP_WAITING') {
     self.skipWaiting();
   }

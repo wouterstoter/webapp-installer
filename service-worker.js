@@ -272,7 +272,6 @@ async function request(input, options, navigate=false) {
     }
 
     switch (input.method) {
-      case "HEAD":
       case "GET":
         var responses = await cache.matchAll(input,{ignoreSearch: true, ignoreMethod: true, ignoreVary: true})
         if (url.pathname.toLowerCase().endsWith(".zip")) {
@@ -285,7 +284,7 @@ async function request(input, options, navigate=false) {
           } else {
             zippath = zippath.slice(0,-4) + "/";
             files = (await cache.keys()).filter(r => r.url.startsWith(BASE + zippath));
-            if (files.length == 0) return errorpage(404,app);
+            if (files.length == 0) return errorpage(404,navigate ? app : null);
           }
           const zipper = new zip.ZipWriterStream();
           var headers = new Headers(responses[0]?.headers);
@@ -328,6 +327,64 @@ async function request(input, options, navigate=false) {
           var index_url = new URL(url)
           index_url.pathname += "index.html";
           responses = await cache.matchAll(new Request(index_url,input),{ignoreSearch: true, ignoreMethod: true, ignoreVary: true});
+          // Show folder list
+          if (responses.length == 0) {
+            var files = (await cache.keys()).filter(r => r.url.startsWith(url.origin + url.pathname))
+            if (files.length == 0) return errorpage(404,navigate ? app : null);
+            var stream = streamFromGenerator((async function* () {
+              var encoder = new TextEncoder();
+              if (navigate) {
+                var text = await caches.match(BASE + "folder.html",{cacheName:CACHE})
+                for await (const chunk of text.body) {
+                  yield chunk;
+                }
+              } else {
+                yield encoder.encode("200: filename content-length last-modified file-type")
+              }
+              if (navigate) {
+                let path = url.pathname.slice((BASE.pathname + app.join("/")).length);
+                yield encoder.encode(`<script>start(${JSON.stringify(app.slice(-1) + path)});</script>`);
+                if (path.length > 1) yield encoder.encode(`<script>onHasParentDirectory();</script>`);
+              }
+              files = files.map(r => {
+                let uri = r.url.slice((url.origin + url.pathname).length);
+                let hash = uri.indexOf("#");
+                [uri, hash] = [uri.slice(0,hash),uri.slice(hash)];
+                let search = uri.indexOf("?");
+                [uri, search] = [uri.slice(0,search),uri.slice(search)];
+                uri = uri.split("/");
+                if (uri.length > 1) {
+                  hash = search = "";
+                  uri[0] += "/";
+                }
+                return uri[0] + search + hash;
+              }).filter(r => !r[0].startsWith(".")); // Hide dotfiles
+              files = [...new Set(files)].sort().sort((a,b) => b.toLowerCase() > a.toLowerCase() ? -1 : 1).sort((a,b) => b.endsWith("/") - a.endsWith("/"));
+              for (var f = 0; f < files.length; ++f) {
+                let file;
+                if (!files[f].endsWith("/")) {
+                  file = await cache.match(url.origin + url.pathname + files[f]);
+                } else {
+                  files[f] = files[f].slice(0,-1);
+                }
+                var contentLength = Number(file?.headers?.get("Content-Length")) || 0;
+                var lastModified = file?.headers?.get("Last-Modified");
+                if (lastModified) lastModified = new Date(lastModified);
+                if (navigate) {
+                  function bytesToString(bytes) {
+                    var txt = ["B","kB","MB","GB","TB"]
+                    while (bytes / 1024 > 1 && txt.length > 1) {
+                      bytes = bytes / 1024;
+                      txt.shift();
+                    }
+                    return (Math.round(bytes*10)/10).toLocaleString() + " " + txt[0]
+                  }
+                  yield encoder.encode(`<script>addRow(${JSON.stringify(files[f])},${JSON.stringify(files[f])},${Number(!file)},${contentLength},${JSON.stringify(bytesToString(contentLength))},${Number(lastModified)},${JSON.stringify(lastModified?.toLocaleString()||"")});</script>`);
+                }
+              }
+            })());
+            return new Response(stream,{headers:{"Content-Type":navigate ? "text/html" : "text/plain"}});
+          }
         } else if (responses.length == 0 && !url.pathname.toLowerCase().endsWith(".html")) {
           var index_url = new URL(url)
           index_url.pathname += ".html";
@@ -335,10 +392,11 @@ async function request(input, options, navigate=false) {
         }
         var response = responses[0];
         if (response) response = await deCrompressResponse(response,password,url,app);
-        return response || errorpage(404,app);
+        return response || errorpage(404,navigate ? app : null);
         break;
       case "HEAD":
-        var response = request(input,{method: "GET"});
+        var response = await cache.match(input,{ignoreSearch: true, ignoreMethod: true, ignoreVary: true})
+        if (!response) response = request(input,{method: "GET"});
         return new Response(null,{status: response.status, statusText: response.statusText, headers: response.headers});
       case "PUT":
         if (url.pathname.endsWith(".zip") || url.pathname.endsWith(".app")) {
@@ -504,4 +562,25 @@ async function deCrompressResponse(response,password,url,app) {
   } else {
     return response;
   }
+}
+
+/**
+ * Create a readable stream from a generator
+ * @param {Iterable} gen - The generator
+ * @returns {ReadableStream} The stream
+ */
+function streamFromGenerator(gen) {
+  return new ReadableStream({
+    async pull(controller) {
+      const { value, done } = await gen.next();
+      if (done) {
+        controller.close();
+      } else {
+        controller.enqueue(value);
+      }
+    },
+    cancel(reason) {
+      return gen.return(reason);
+    }
+  });
 }

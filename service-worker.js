@@ -349,8 +349,10 @@ async function request(input, options, navigate=false) {
               files = files.map(r => {
                 let uri = r.url.slice((url.origin + url.pathname).length);
                 let hash = uri.indexOf("#");
+                hash = hash == -1 ? undefined : hash;
                 [uri, hash] = [uri.slice(0,hash),uri.slice(hash)];
                 let search = uri.indexOf("?");
+                search = search == -1 ? undefined : search;
                 [uri, search] = [uri.slice(0,search),uri.slice(search)];
                 uri = uri.split("/");
                 if (uri.length > 1) {

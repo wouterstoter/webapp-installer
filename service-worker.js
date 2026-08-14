@@ -27,7 +27,8 @@ const CACHE_URLS = [
   'libs/fonts/bootstrap-icons.woff',
   'libs/fonts/bootstrap-icons.woff2',
   '404.html',
-  '500.html'
+  '500.html',
+  'folder.html'
 ];
 
 self.addEventListener('install', event => {

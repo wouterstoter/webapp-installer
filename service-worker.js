@@ -305,7 +305,7 @@ async function request(input, options, navigate=false) {
               }
               var options = {
                 passThrough:true,
-                uncompressedSize: Number(response.headers.get("Content-Length")) || undefined,
+                uncompressedSize: response.headers.has("Content-Length") ? Number(response.headers.get("Content-Length")) : undefined,
                 encrypted: response.headers.has("X-Content-Encryption"),
                 compressionMethod: encoding.indexOf("zip") == -1 && encoding.indexOf("zip64") == -1 ? 0 : 8,
                 zip64: encoding.indexOf("zip64") != -1,
@@ -349,11 +349,9 @@ async function request(input, options, navigate=false) {
               files = files.map(r => {
                 let uri = r.url.slice((url.origin + url.pathname).length);
                 let hash = uri.indexOf("#");
-                hash = hash == -1 ? undefined : hash;
-                [uri, hash] = [uri.slice(0,hash),uri.slice(hash)];
+                if (hash != -1) {[uri, hash] = [uri.slice(0,hash),uri.slice(hash)];} else {hash = ""}
                 let search = uri.indexOf("?");
-                search = search == -1 ? undefined : search;
-                [uri, search] = [uri.slice(0,search),uri.slice(search)];
+                if (search != -1) {[uri, search] = [uri.slice(0,search),uri.slice(search)];} else {search = ""}
                 uri = uri.split("/");
                 if (uri.length > 1) {
                   hash = search = "";
@@ -382,6 +380,8 @@ async function request(input, options, navigate=false) {
                     return (Math.round(bytes*10)/10).toLocaleString() + " " + txt[0]
                   }
                   yield encoder.encode(`<script>addRow(${JSON.stringify(files[f])},${JSON.stringify(files[f])},${Number(!file)},${contentLength},${JSON.stringify(bytesToString(contentLength))},${Number(lastModified)},${JSON.stringify(lastModified?.toLocaleString()||"")});</script>`);
+                } else {
+                  yield encoder.encode(`\r\n201: ${encodeURI(files[f])} ${contentLength || 0} ${encodeURI((lastModified || new Date()).toUTCString())} ${!file ? "DIRECTORY" : "FILE"}`)
                 }
               }
             })());

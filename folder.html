@@ -137,6 +137,30 @@ function onLoad() {
 }
 
 window.addEventListener('DOMContentLoaded', onLoad);
+
+// EDIT BY WOUTER: Save on Ctrl+S
+const APP_EXTS = [".zip",".har",".app"]
+document.addEventListener('keydown', e => {
+  if (e.ctrlKey && e.key === 's') {
+    e.preventDefault();
+    var ext;
+    if (APP_EXTS.map(a => a + "/").indexOf(document.location.pathname.slice(-5).toLowerCase()) != -1) {
+      ext = "";
+    } else {
+      var path = document.location.pathname.split("/")
+      while (path.length > 0 && APP_EXTS.indexOf(path.slice(-1)[0].slice(-4).toLowerCase()) == -1) {
+        path.pop()
+      }
+      ext = path.length == 0 ? APP_EXTS[0] : path.slice(-1)[0].slice(-4);
+    }
+    var a = document.createElement("a");
+    a.href = document.location.href;
+    a.pathname = a.pathname.slice(0,-1) + ext;
+    //a.setAttribute("download","");
+    a.click();
+  }
+});
+// TODO: Find a way to let it download at root folder of the zip, since there we have no access to the parent
 </script>
 
 <style>

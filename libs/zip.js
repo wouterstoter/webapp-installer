@@ -6089,7 +6089,7 @@
 			this.pendingAddFileCalls = new Set();
 		}
 
-		transform(path) {
+		transform(path, options) {
 			const zipWriter = this.zipWriter;
 			let streamController;
 			const { readable, writable } = new TransformStream({
@@ -6098,7 +6098,7 @@
 				},
 				flush: () => void closeArchive()
 			});
-			watchAddFileCall(this, this.zipWriter.add(path, readable), error => streamController.error(error));
+			watchAddFileCall(this, this.zipWriter.add(path, readable, options), error => streamController.error(error));
 			return { readable: this.readable, writable };
 
 			async function closeArchive() {
@@ -6114,14 +6114,14 @@
 			}
 		}
 
-		writable(path) {
+		writable(path, options) {
 			let streamController;
 			const { readable, writable } = new TransformStream({
 				start(controller) {
 					streamController = controller;
 				}
 			});
-			watchAddFileCall(this, this.zipWriter.add(path, readable), error => streamController.error(error));
+			watchAddFileCall(this, this.zipWriter.add(path, readable, options), error => streamController.error(error));
 			return writable;
 		}
 

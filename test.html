@@ -15,7 +15,10 @@ async function rezipper(input,options = {}) {
         if (input instanceof ReadableStream) {
             const zipReader = new zip.ZipReaderStream();
             const zipStream = input.pipeThrough(new zip.ZipWriterStream().transform('file',unzip ? {...options, passThrough: true} : options));
-            input = (await zipStream.pipeThrough(zipReader).values().next()).value;
+            const iterator = zipStream.pipeThrough(zipReader).values();
+            const { value: entry } = await iterator.next();
+            await iterator.return(); // Clean up the stream so the end of directory doesn't have to be written
+            input = entry;
         }
         [input, options, headers] = [await EntryToStream(input,options), ...EntryToOptions(input,headers)];
     } else {

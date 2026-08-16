@@ -9,7 +9,7 @@
 async function rezipper(input,options = {}) {
     let headers;
     unzip = true;
-    [input, options, headers] = await ReqResToOptions(input,options);
+    [input, options, headers] = await HeadersToOptions(input,options);
     if (!("uncompressedSize" in options)) unzip = false;
     if (!options.passThrough) {
         if (input instanceof ReadableStream) {
@@ -37,7 +37,7 @@ async function rezipper(input,options = {}) {
  * @returns {zip.ZipWriterAddDataOptions|zip.EntryGetDataOptions} options
  * @returns {Headers} headers
  */
-async function ReqResToOptions(input,options = {}) {
+async function HeadersToOptions(input,options = {}) {
     let headers = [];
     if (options instanceof Headers) {
         headers.push(options);
@@ -45,6 +45,7 @@ async function ReqResToOptions(input,options = {}) {
     }
     if (input instanceof Request || input instanceof Response) {
         headers.push(input.headers);
+        options["password"] = options["password"] || input.url?.split("/")[2]?.split("@").slice(0,-1)[0]?.split(":")[1];
         input = input.body || (await input.blob()).stream();
     }
     if (headers.length > 0) {
@@ -55,6 +56,8 @@ async function ReqResToOptions(input,options = {}) {
                     let newKey = key.slice("x-zipjs-".length)
                     newKey = newKey.split("-").map((word,n) => n == 0 ? word : word[0].toUpperCase() + word.slice(1)).join("");
                     options[newKey] = options[newKey] || isNaN(value) ? value : Number(value);
+                } else if (key.toLowerCase() == "Authorization" && value.toLowerCase().startsWith("basic ")) {
+                    options[password] = options[password] || atob(value.slice("Basic ".length)).split(":")[1];
                 } else if (!outputHeaders.has(key)) {
                     outputHeaders.set(key,value)
                 }

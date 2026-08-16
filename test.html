@@ -1,0 +1,108 @@
+<script src="libs/zip.js" type="text/javascript"></script>
+<script>
+/**
+ * Zip/Unzip a file
+ * @param {Request|Response|zip.ZipFileEntry|ReadableStream} input - The file to be zipped/unzipped
+ * @param {Headers|zip.ZipWriterAddDataOptions|zip.EntryGetDataOptions} [options] - The options to zip/unzip with (can also be part of headers of Request/Response)
+ * @returns {Response} The zipped/unzipped response with the right headers
+ */
+async function rezipper(input,options = {}) {
+    let headers;
+    unzip = true;
+    [input, options, headers] = await ReqResToOptions(input,options);
+    if (!("uncompressedSize" in options)) unzip = false;
+    if (!options.passThrough) {
+        if (input instanceof ReadableStream) {
+            const zipReader = new zip.ZipReaderStream(unzip ? options : {passThrough: true});
+            const zipStream = input.pipeThrough(new zip.ZipWriterStream().transform('file',unzip ? {...options, passThrough: true} : options));
+            input = (await zipStream.pipeThrough(zipReader).values().next()).value;
+        }
+        [input, options, headers] = await EntryToOptions(input,headers);
+    } else {
+        delete options.passThrough;
+    }
+    for (const key in options) {
+        let newKey = "x-zipjs-" + key.replace(/\W+/g, " ").split(/ |\B(?=[A-Z])/).map(word => word.toLowerCase()).join("-")
+        headers.set(newKey, Number(options[key]) || options[key])
+    }
+    return new Response(input,{headers});
+}
+/**
+ * @param {Request|Response} input
+ * @param {Headers|zip.ZipWriterAddDataOptions|zip.EntryGetDataOptions} [options]
+ * @returns {ReadableStream} input
+ * @returns {zip.ZipWriterAddDataOptions|zip.EntryGetDataOptions} options
+ * @returns {Headers} headers
+ */
+async function ReqResToOptions(input,options = {}) {
+    let headers = [];
+    if (options instanceof Headers) {
+        headers.push(options);
+        options = {};
+    }
+    if (input instanceof Request || input instanceof Response) {
+        headers.push(input.headers);
+        input = input.body || (await input.blob()).stream();
+    }
+    if (headers.length > 0) {
+        let outputHeaders = new Headers();
+        for (let h = 0; h < headers.length; ++h) {
+            for (const [key,value] of headers[h].entries()) {
+                if (key.toLowerCase().startsWith("x-zipjs-")) {
+                    let newKey = key.slice("x-zipjs-".length)
+                    newKey = newKey.split("-").map((word,n) => n == 0 ? word : word[0].toUpperCase() + word.slice(1)).join("");
+                    options[newKey] = options[newKey] || isNaN(value) ? value : Number(value);
+                } else if (!outputHeaders.has(key)) {
+                    outputHeaders.set(key,value)
+                }
+            }
+        }
+        headers = outputHeaders;
+    }
+    return [input, options, headers]
+}
+/**
+ * @param {zip.ZipFileEntry} input
+ * @param {Headers} headers
+ * @returns {ReadableStream} input
+ * @returns {Headers} headers
+ */
+async function EntryToOptions(input,headers = new Headers()) {
+    console.log(input);
+    // Now input is an ZipFileEntry
+    if (!headers.has("Date") && input.creationDate) headers.set("Date",input.creationDate.toUTCString());
+    if (!headers.has("Last-Modified") && input.lastModDate) headers.set("Last-Modified",input.lastModDate.toUTCString());
+    //if (!headers.has("Content-Type") && input.filename != "file") mime.getType(entry.filename)
+    headers.set("Content-Length",unzip ? input.uncompressedSize : input.compressedSize);
+    var options = {};
+    if (!unzip) {
+        if (input.crc32) options.crc32 = input.crc32;
+        options.uncompressedSize = input.uncompressedSize
+        if (input.encrypted) options.encrypted = input.encrypted;
+        if (input.encrypted && input.zipCrypto) options.zipCrypto = input.zipCrypto;
+        if (input.encrypted && !input.zipCrypto) options.encryptionStrength = input.extraFieldAES.strength;
+    }
+    if (unzip && input.encrypted) {
+        // Check for errors for encrypted files
+        [input,probe] = input.readable.tee(); // split stream in 2
+        try {
+            const reader = probe.getReader();
+            await reader.read(); // throws here if the password is wrong
+            await reader.cancel(); // don't bother reading the rest
+        } catch(e) {
+            throw new Error(e);
+        }
+    } else {
+        input = input.readable;
+    }
+    return [input, options, headers]
+}
+var start = new Request("/",{method:"PUT",body:"There's 104 days of summervacation"})
+rezipper(start,{password:"TEST",encryptionStrength:2})
+.then(a => {
+    let b = a.clone()
+    b.text().then(t => console.log(b,t)).catch(console.error);
+    return a;
+}).then(a => rezipper(a,{password:""}))
+.then(a => a.text().then(t => console.log(a,t))).catch(console.error)
+</script>

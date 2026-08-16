@@ -13,11 +13,11 @@ async function rezipper(input,options = {}) {
     if (!("uncompressedSize" in options)) unzip = false;
     if (!options.passThrough) {
         if (input instanceof ReadableStream) {
-            const zipReader = new zip.ZipReaderStream(unzip ? options : {passThrough: true});
+            const zipReader = new zip.ZipReaderStream();
             const zipStream = input.pipeThrough(new zip.ZipWriterStream().transform('file',unzip ? {...options, passThrough: true} : options));
             input = (await zipStream.pipeThrough(zipReader).values().next()).value;
         }
-        [input, options, headers] = await EntryToOptions(input,headers);
+        [input, options, headers] = [await EntryToStream(input,options), ...EntryToOptions(input,headers)];
     } else {
         delete options.passThrough;
     }
@@ -67,8 +67,7 @@ async function ReqResToOptions(input,options = {}) {
  * @returns {ReadableStream} input
  * @returns {Headers} headers
  */
-async function EntryToOptions(input,headers = new Headers()) {
-    console.log(input);
+function EntryToOptions(input,headers = new Headers()) {
     // Now input is an ZipFileEntry
     if (!headers.has("Date") && input.creationDate) headers.set("Date",input.creationDate.toUTCString());
     if (!headers.has("Last-Modified") && input.lastModDate) headers.set("Last-Modified",input.lastModDate.toUTCString());
@@ -82,9 +81,18 @@ async function EntryToOptions(input,headers = new Headers()) {
         if (input.encrypted && input.zipCrypto) options.zipCrypto = input.zipCrypto;
         if (input.encrypted && !input.zipCrypto) options.encryptionStrength = input.extraFieldAES.strength;
     }
+    return [options, headers]
+}
+/**
+ * @param {zip.ZipFileEntry} input
+ * @param {zip.EntryGetDataOptions} options
+ * @returns {ReadableStream} input
+ */
+async function EntryToStream(input,options) {
+    input = input.readable(unzip ? options : {passThrough: true});
     if (unzip && input.encrypted) {
         // Check for errors for encrypted files
-        [input,probe] = input.readable.tee(); // split stream in 2
+        [input,probe] = input.tee(); // split stream in 2
         try {
             const reader = probe.getReader();
             await reader.read(); // throws here if the password is wrong
@@ -92,17 +100,15 @@ async function EntryToOptions(input,headers = new Headers()) {
         } catch(e) {
             throw new Error(e);
         }
-    } else {
-        input = input.readable;
     }
-    return [input, options, headers]
+    return input
 }
 var start = new Request("/",{method:"PUT",body:"There's 104 days of summervacation"})
-rezipper(start,{password:"TEST",encryptionStrength:2})
+rezipper(start,{password:"TEST",zipCrypto:true})
 .then(a => {
     let b = a.clone()
     b.text().then(t => console.log(b,t)).catch(console.error);
     return a;
-}).then(a => rezipper(a,{password:""}))
+}).then(a => rezipper(a,{password:"TEST"}))
 .then(a => a.text().then(t => console.log(a,t))).catch(console.error)
 </script>

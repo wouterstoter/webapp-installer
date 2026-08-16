@@ -4971,7 +4971,7 @@
 						return controller.close();
 					const chunk = {
 						...value,
-						readable: (function () {
+						readable: function (options) {
 							const { readable, writable } = new TransformStream();
 							if (value.getData) {
 								getData();
@@ -4980,7 +4980,7 @@
 
 							async function getData() {
 								try {
-									await value.getData(writable);
+									await value.getData(writable,options);
 								} catch (error) {
 									try {
 										await writable.abort(error);
@@ -4989,7 +4989,7 @@
 									}
 								}
 							}
-						})()
+						}
 					};
 					delete chunk.getData;
 					controller.enqueue(chunk);

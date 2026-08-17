@@ -1,8 +1,8 @@
-import mime from './libs/mime.min.js';
 import "./libs/zip.js";
+import {rezipper, HeadersToOptions} from "./rezip.js";
 
 const CACHE_BASE = 'webapp-installer-';
-const CACHE = CACHE_BASE + '2026-08-13';
+const CACHE = CACHE_BASE + '2026-08-17';
 const BASE = new URL(".",self.location.href);
 const APP_EXTS = ["zip","har","app"]
 
@@ -23,6 +23,7 @@ const CACHE_URLS = [
   'libs/bootstrap.min.css',
   'libs/bootstrap-icons.min.css',
   'libs/zip.js',
+  'rezip.js',
   'libs/mime.min.js',
   'libs/fonts/bootstrap-icons.woff',
   'libs/fonts/bootstrap-icons.woff2',
@@ -295,18 +296,16 @@ async function request(input, options, navigate=false) {
             // Skip files and folders whose name starts with .
             if (("/" + f.url.slice((BASE + zippath).length)).split("#")[0].split("?")[0].indexOf("/.") != -1) return
             return cache.match(f)
-            .then(response => {
-              var body = response.body;
-              var encoding = response.headers.get("Content-Encoding")?.split(" ") || [];
+            .then(response => HeadersToOptions(response))
+            .then(([body, options, headers]) => {
+              var encoding = headers.get("Content-Encoding")?.split(" ") || [];
               for (var i = 0; i < encoding.length; ++i) {
-                if (encoding[i] == "zip" || encoding[i] == "zip64") break;
+                if (encoding[i] == "zipjs") break;
                 body = body.pipeThrough(new DecompressionStream(encoding[i]))
                 encoding.splice(i,1);
                 i--;
               }
-              var options = headersToOptions(response.headers);
               options.passThrough = true;
-              console.log(options);
               body.pipeTo(zipper.writable(f.url.slice((BASE + zippath).length),options));
             });
           });
@@ -385,12 +384,17 @@ async function request(input, options, navigate=false) {
           responses = await cache.matchAll(new Request(index_url,input),{ignoreSearch: true, ignoreMethod: true, ignoreVary: true});
         }
         var response = responses[0];
-        if (response) response = await deCrompressResponse(response,password,url,app);
+        if (response && response.headers.has("Content-Encoding")) response = await rezipper(response,{password}).catch(e => {
+          if (e.message == zip.ERR_ENCRYPTED || e.message == zip.ERR_INVALID_PASSWORD) return errorpage(401,navigate ? app : null);
+          console.error(e)
+          return errorpage(500,navigate ? app : null);
+        });
         return response || errorpage(404,navigate ? app : null);
         break;
       case "HEAD":
         var response = await cache.match(input,{ignoreSearch: true, ignoreMethod: true, ignoreVary: true})
         if (!response) response = request(input,{method: "GET"});
+        response.body.cancel(); // Cancel the whole readable stream
         return new Response(null,{status: response.status, statusText: response.statusText, headers: response.headers});
       case "PUT":
         if (url.pathname.endsWith(".zip") || url.pathname.endsWith(".app")) {
@@ -400,13 +404,13 @@ async function request(input, options, navigate=false) {
           var new_cache = await caches.open(new_app);
           const zipReader = new zip.ZipReaderStream({passThrough: true});
           const zipStream = input.body || (await input.blob()).stream();
+          var promises = [];
           for await (const entry of (zipStream.pipeThrough(zipReader))) {
             if (entry.directory) continue;
             if (entry.filename.startsWith(".") || entry.filename.indexOf("/.") != -1) continue
-            var headers = entryToHeaders(entry);
-            var response = new Response(entry.readable,{headers});
-            await new_cache.put(BASE + new_app + "/" + entry.filename, response)
+            promises.push(((entry) => rezipper(entry).then(response => new_cache.put(BASE + new_app + "/" + entry.filename, response)))(entry))
           }
+          await Promise.all(promises);
           if (exists) return new Response(null,{status:200,statusText:"OK",headers:{Location:url.href}})
           return new Response(null,{status:201,statusText:"Created",headers:{Location:url.href}})
         } else {
@@ -420,46 +424,12 @@ async function request(input, options, navigate=false) {
           }
           // Handle regular puts
           if (!res) {
-            var body = input.body || (await input.blob()).steam();
-            var passThrough = !!Number(input.headers.get("X-Pass-Through"));
-            var headers;
-            if (!passThrough && (input.headers.has("Content-Encoding") || password)) {
-              var encoding = input.headers.get("Content-Encoding").toLowerCase().split(" ");
-              if (password) encoding.unshift("encrypt")
-              for (var i = 0; i < encoding.length; ++i) {
-                try {
-                  if (encoding[i] == "zip" || encoding[i] == "zip64" || encoding[i] == "encrypt") {
-                    var options = {
-                      compressionMethod: encoding.indexOf("zip") != -1 || encoding.indexOf("zip64") != -1 ? 8 : 0,
-                      password: password
-                    }
-                    const zipReader = new zip.ZipReaderStream({passThrough: true});
-                    const zipStream = body.pipeThrough(new zip.ZipWriterStream().transform('file',options));
-                    for await (const entry of (zipStream.pipeThrough(zipReader))) {
-                      var headers = entryToHeaders(entry,input.headers);
-                      console.log(entry,headers);
-                      body = entry.readable;
-                    }
-                    headers.delete("Authentication"); // Make sure the password isn't stored in the headers
-
-                    while (encoding.indexOf("zip") != -1) encoding.splice(encoding.indexOf("zip"),1);
-                    while (encoding.indexOf("zip64") != -1) encoding.splice(encoding.indexOf("zip64"),1);
-                    while (encoding.indexOf("decrypt") != -1) encoding.splice(encoding.indexOf("decrypt"),1);
-                    encoding.splice(i,0,headers.get("Content-Encoding"));
-                  } else {
-                    body = body.pipeThrough(new CompressionStream(encoding[i]))
-                  }
-                } catch(e) {
-                  // Remove encoding from array if encoding didn't succeed
-                  encoding.splice(i,1);
-                  i--;
-                  console.error(e);
-                }
-              }
-              headers = headers || new Headers(input.headers);
-              headers.set("Content-Encoding",encoding.join(" "));
+            if (input.headers.has("Content-Encoding")) {
+              res = await rezipper(input);
+            } else {
+              var body = input.body || (await input.blob()).steam();
+              res = new Response(body,{headers:headers || input.headers})
             }
-            res = new Response(body,{headers:headers || input.headers})
           }
           await cache.put(new Request(url,{method:"GET"}), res)
           // Send responses
@@ -508,7 +478,12 @@ async function errorpage(status,app) {
   var body
   if (response) {
     // Only process decompression if not encrypted for 501, since no password is known.
-    if (status != 501 || !response.headers.has("X-Content-Encryption")) response = await deCrompressResponse(response,null,url);
+    if (response.headers.has("Content-Encoding") && (status != 501 || !response.headers.has("X-ZipJS-Encrypted"))) {
+      response = await rezipper(response).catch(e => {}); // If we cannot read it, just show no error page. 
+      // We're not gonna give an error for the error page
+    }
+  }
+  if (response) {
     body = new Uint8Array(await response.arrayBuffer());
     try {
       var decoder = new TextDecoder('utf-8', { fatal: true }); // Throws an error if not UTF-8 encoded, so the regular response can be used
@@ -525,70 +500,6 @@ async function errorpage(status,app) {
   headers.set("Referrer-Policy", "origin-when-cross-origin") // Prevent sharing the referrer externally
   return new Response(body,{status: status, statusText: statusText, headers: headers})
 }
-
-/**
- * Decrypt/decompress response
- * @param {Response} response - The response to decrypt/decompress
- * @param {string} [password] - The password to decrypt with
- * @param {Response} [url] - The url, only needed for clear error logging
- * @param {Response} [app] - The app, only needed to serve the right error page
- * @returns {Response} The decrypted/decompressed response
- */
-async function deCrompressResponse(response,password,url,app) {
-  if (response.headers.has("Content-Encoding") || response.headers.has("X-Content-Encryption")) {
-    var body = response.body;
-    var decompression = response.headers.get("Content-Encoding").split(" ").reverse(); // reverse so the last applied gets removed first
-    if (response.headers.has("X-Content-Encryption")) decompression.push("decrypt");
-    for (var i = 0; i < decompression.length; ++i) {
-      try {
-        if (decompression[i] == "zip" || decompression[i] == "zip64" || decompression[i] == "decrypt") {
-          var config = zip.getConfiguration();
-          var inflateOptions = headersToOptions(response.headers);
-          if (inflateOptions.encrypted && !password) return errorpage(401,app);
-          if (password) inflateOptions.password = password;
-          if (inflateOptions.encrypted) {
-            //Check password
-            var probe 
-            [probe, body] = body.tee();
-            try {
-              probe = probe.pipeThrough(new zip.InflateStream(inflateOptions, config));
-              const reader = probe.getReader();
-              await reader.read(); // throws here if the password is wrong
-              await reader.cancel(); // don't bother reading the rest
-            } catch(e) {
-              if (e.message == zip.ERR_INVALID_PASSWORD) return errorpage(401,app);
-              console.error(e);
-            }
-          }
-          body = body.pipeThrough(new zip.InflateStream(inflateOptions, config));
-          while (decompression.indexOf("zip") != -1) decompression.splice(decompression.indexOf("zip"),1);
-          while (decompression.indexOf("zip64") != -1) decompression.splice(decompression.indexOf("zip64"),1);
-          while (decompression.indexOf("decrypt") != -1) decompression.splice(decompression.indexOf("decrypt"),1);
-          i--;
-        } else {
-          body = body.pipeThrough(new DecompressionStream(decompression[i]))
-          decompression.splice(i,1);
-          i--;
-        }
-      } catch(e) {console.warn(`Failed ${decompression[i]} decompression on ${url}. Serving compressed file.`,e)}
-    }
-    var headers = new Headers(response.headers)
-    if (decompression.indexOf("decrypt") == -1) {
-      headers.delete("X-Content-Encryption")
-    } else {
-      decompression.splice(decompression.indexOf("decrypt"),1);
-    }
-    if (decompression.length === 0) {
-      headers.delete("Content-Encoding")
-    } else {
-      headers.set("Content-Encoding",decompression.reverse().join(" "))
-    }
-    return new Response(body,{headers: headers, status: response.status, statusText: response.statusText})
-  } else {
-    return response;
-  }
-}
-// TODO: Make actually work for Zip64 / figure out what the 'format' attribute in InflateStream should be.
 
 /**
  * Create a readable stream from a generator
@@ -609,51 +520,4 @@ function streamFromGenerator(gen) {
       return gen.return(reason);
     }
   });
-}
-
-/**
- * Create headers with the right metadata fields from a zip entry
- * @param {zip.Entry} entry - The generator
- * @param {Headers} [headers] - Headers to start with
- * @returns {Headers} The headers for the response
- */
-function entryToHeaders(entry,headers) {
-  headers = new Headers(headers || {});
-  headers.set("Last-Modified",(entry.lastModDate || new Date()).toUTCString());
-  headers.set("Date",(entry.creationDate || new Date()).toUTCString());
-  if (entry.uncompressedSize) headers.set("Content-Length",entry.uncompressedSize);
-  headers.set("Content-Type",mime.getType(entry.filename));
-  if (entry.compressionMethod === 8) headers.set("Content-Encoding",entry.zip64 ? "zip64" : "zip");
-  if (entry.signature) headers.set("X-Content-Signature",entry.signature);
-  if (entry.encrypted) headers.set("X-Content-Encryption",entry.zipCrypto ? "zipCrypto" : "AES" + entry.extraFieldAES.strength);
-  return headers;
-}
-/**
- * Create headers with the right metadata fields from a zip entry
- * @param {Headers} [headers] - Headers of the response
- * @returns {zip.ZipWriterAddDataOptions} The options to add this file to a zip
- */
-function headersToOptions(headers) {
-  // Some options have a different name in the InflateStream options than the ZipWriter options. 
-  // In those cases i'll add both for extra compatibility
-  var encoding = headers.get("Content-Encoding")?.split(" ") || [];
-  return {
-    //passThrough:true, // ZipWriter Only
-    //passwordVerification: false, // Inflate Only
-    useCompressionStream: typeof CompressionStream === "function", // Inflate Only
-    uncompressedSize: headers.has("Content-Length") ? Number(headers.get("Content-Length")) : undefined, // ZipWriter Only
-    outputSize: headers.has("Content-Length") ? Number(headers.get("Content-Length")) : undefined, // Inflate Only
-    encrypted: headers.has("X-Content-Encryption"),
-    compressed: encoding.indexOf("zip") != -1 || encoding.indexOf("zip64") != -1, // Inflate Only
-    compressionMethod: encoding.indexOf("zip") == -1 && encoding.indexOf("zip64") == -1 ? 0 : 8,
-    zip64: encoding.indexOf("zip64") != -1, // ZipWriter Only
-    deflate64: encoding.indexOf("zip64") != -1,
-    signed: headers.has("X-Content-Signature"), // Inflate Only
-    signature: Number(headers.get("X-Content-Signature")) || undefined, // Deprecated
-    crc32: Number(headers.get("X-Content-Signature")) || undefined, // New signature
-    zipCrypto: headers.get("X-Content-Encryption") == "zipCrypto",
-    encryptionStrength: Number(headers.get("X-Content-Encryption")?.replace("AES","")) || undefined,
-    lastModDate: new Date(headers.get("Last-Modified") || new Date()), // ZipWriter Only
-    creationDate: new Date(headers.get("Date") || new Date()) // ZipWriterOnly
-  }
 }

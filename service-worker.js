@@ -113,25 +113,27 @@ self.addEventListener('activate', function(event) {
 self.addEventListener('fetch', event => {
   var r = event.request;
   var referrer = r.referrer ? new URL(r.referrer) : ""
-  event.respondWith(
+  event.respondWith((async () => {
+    var client;
+    if (event.clientId) client = self.clients.get(event.clientId) // still a promise;
     // Get client if the referrer is just the host, otherwise, empty promise
     // Don't get a referrer if there is none, we assume that is user navigation
-    (event.clientId && (referrer.pathname == "/") ? self.clients.get(event.clientId) : new Promise(resolve => resolve()))
-    .then((client) => {
-      var r = event.request;
-      var referrer = client?.url || r.referrer;
-      var url = wURL(r.url,referrer);
-      if (url != r.url && (r.method == "GET" || r.method == "HEAD")) return Response.redirect(url,302);
+    var r = event.request;
+    if (referrer.pathname == "/") {
+      client = await client;
+      referrer = client?.url
+    }
+    var url = wURL(r.url,referrer);
+    if (url != r.url && (r.method == "GET" || r.method == "HEAD")) return Response.redirect(url,302);
 
-      var navigate = r.mode == "navigate";
-      if (referrer != r.referrer) {
-        r = new Request(r, {referrer: client.url})
-      }
-      if (url != r.url) r = new Request(url, r)
+    var navigate = r.mode == "navigate";
+    if (referrer != r.referrer) {
+      r = new Request(r, {referrer})
+    }
+    if (url != r.url) r = new Request(url, r)
 
-      return request(r, null, navigate)
-    })
-  );
+    return request(r, null, navigate, client)
+  })());
 });
 
 self.addEventListener('message', (event) => {
@@ -230,9 +232,10 @@ function wURL(url,base) {
  * @param {URL | String | Request} input - The destination of the request
  * @param {RequestInit | Request | null} [options] - Additional options for the request
  * @param {Boolean} [navigate=false] - Indicates that the request is a navigation
+ * @param {Promise} [client] - The page that made the request, which can be reported back to
  * @returns {Response} The response to the request
  */
-async function request(input, options, navigate=false) {
+async function request(input, options, navigate=false, client) {
   var app;
   try {
     let url;
@@ -378,7 +381,7 @@ async function request(input, options, navigate=false) {
             })());
             return new Response(stream,{headers:{"Content-Type":navigate ? "text/html" : "text/plain"}});
           }
-        } else if (responses.length == 0 && !url.pathname.toLowerCase().endsWith(".html")) {
+        } else if (responses.length == 0 && !url.pathname.toLowerCase().endsWith(".html" && url.pathname.split("/").slice(-1)[0].indexOf(".") == -1)) {
           var index_url = new URL(url)
           index_url.pathname += ".html";
           responses = await cache.matchAll(new Request(index_url,input),{ignoreSearch: true, ignoreMethod: true, ignoreVary: true});
@@ -398,17 +401,22 @@ async function request(input, options, navigate=false) {
         return new Response(null,{status: response.status, statusText: response.statusText, headers: response.headers});
       case "PUT":
         if (url.pathname.endsWith(".zip") || url.pathname.endsWith(".app")) {
-          cache.put(new Request(url,{headers:input.headers}),new Response(null,{status:200,headers:input.headers}));
+          cache.put(new Request(url,{method:"GET"}),new Response(null,{status:200,headers:input.headers}));
           var new_app = url.pathname.slice(BASE.pathname.length);
           var exists = await caches.delete(new_app);
           var new_cache = await caches.open(new_app);
           const zipReader = new zip.ZipReaderStream({passThrough: true});
           const zipStream = input.body || (await input.blob()).stream();
           var promises = [];
+          client = await client; //Get the client, so we can send progress updates
+          var progress = 0;
           for await (const entry of (zipStream.pipeThrough(zipReader))) {
             if (entry.directory) continue;
             if (entry.filename.startsWith(".") || entry.filename.indexOf("/.") != -1) continue
-            promises.push(((entry) => rezipper(entry).then(response => new_cache.put(BASE + new_app + "/" + entry.filename, response)))(entry))
+            promises.push(((entry) => rezipper(entry)
+              .then(response => new_cache.put(BASE + new_app + "/" + entry.filename, response))
+              .then(() => {progress += entry.compressedSize;client.postMessage({url:input.url,progress})})
+            )(entry))
           }
           await Promise.all(promises);
           if (exists) return new Response(null,{status:200,statusText:"OK",headers:{Location:url.href}})

@@ -51,10 +51,16 @@
                   body: file
                 })
               });
+              var progressBar = document.querySelector(".progress")
+              progressBar.setAttribute("aria-valuemax",file.size);
+              progressBar.children[0].style.width = "0%"
             }
           </script>
         </div>
         <hr class="col-3 col-md-2 mb-5"/>
+        <div class="progress" role="progressbar" aria-label="Animated striped example" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+          <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 0%"></div>
+        </div>
         <footer class="pt-5 my-5 text-body-secondary border-top">Created by Wouter Stoter · © 2026 </footer>
       </main>
     </div>
@@ -93,6 +99,13 @@
           });
         }, function(err) {
           console.error('ServiceWorker registration failed: ', err);
+        });
+        navigator.serviceWorker.addEventListener('message', (event) => {
+          if ("progress" in event.data) {
+            var progressBar = document.querySelector(".progress")
+            progressBar.setAttribute("aria-valuenow",event.data.progress);
+            progressBar.children[0].style.width = (event.data.progress / progressBar.getAttribute("aria-valuemax") * 100).toFixed(2) + "%"
+          }
         });
       }
     </script>

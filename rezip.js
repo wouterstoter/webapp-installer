@@ -9,6 +9,8 @@ import mime from './libs/mime.min.js';
  */
 export async function rezipper(input,options = {}) {
     let headers;
+    let onprogress = options.onprogress;
+    delete options.onprogress;
     let unzip = true;
     if (input instanceof Request) unzip = false;
     [input, options, headers] = await HeadersToOptions(input,options);
@@ -69,6 +71,9 @@ export async function rezipper(input,options = {}) {
     for (const key in options) {
         let newKey = "x-zipjs-" + key.replace(/\W+/g, " ").split(/ |\B(?=[A-Z])/).map(word => word.toLowerCase()).join("-")
         headers.set(newKey, Number(options[key]) || options[key])
+    }
+    if (onprogress) {
+        input = input.pipeThrough(progressTracker(p => onprogress({...p, total: Number(headers.get("Content-Length"))})));
     }
     return new Response(input,{headers});
 }
@@ -157,4 +162,15 @@ export async function EntryToStream(unzip,input,options) {
         input = input.readable(unzip ? options : {passThrough: true});
     }
     return input
+}
+
+export function progressTracker(onProgress) {
+  let progress = 0;
+  return new TransformStream({
+    transform(chunk, controller) {
+      progress += chunk.byteLength;
+      onProgress({ received: chunk.byteLength, progress });
+      controller.enqueue(chunk);
+    },
+  });
 }

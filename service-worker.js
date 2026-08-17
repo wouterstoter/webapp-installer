@@ -1,5 +1,5 @@
 import "./libs/zip.js";
-import {rezipper, HeadersToOptions} from "./rezip.js";
+import {rezipper, HeadersToOptions, progressTracker} from "./rezip.js";
 
 const CACHE_BASE = 'webapp-installer-';
 const CACHE = CACHE_BASE + '2026-08-17';
@@ -120,8 +120,7 @@ self.addEventListener('fetch', event => {
     // Don't get a referrer if there is none, we assume that is user navigation
     var r = event.request;
     if (referrer.pathname == "/") {
-      client = await client;
-      referrer = client?.url
+      referrer = (await client).url
     }
     var url = wURL(r.url,referrer);
     if (url != r.url && (r.method == "GET" || r.method == "HEAD")) return Response.redirect(url,302);
@@ -400,22 +399,21 @@ async function request(input, options, navigate=false, client) {
         response.body.cancel(); // Cancel the whole readable stream
         return new Response(null,{status: response.status, statusText: response.statusText, headers: response.headers});
       case "PUT":
+        var stream = input.body || (await input.blob()).stream();
         if (url.pathname.endsWith(".zip") || url.pathname.endsWith(".app")) {
+          var progress = 0;
+          var onprogress = async p => (await client).postMessage({received: p.received, progress: progress += p.received, url: input.url});
           cache.put(new Request(url,{method:"GET"}),new Response(null,{status:200,headers:input.headers}));
           var new_app = url.pathname.slice(BASE.pathname.length);
           var exists = await caches.delete(new_app);
           var new_cache = await caches.open(new_app);
           const zipReader = new zip.ZipReaderStream({passThrough: true});
-          const zipStream = input.body || (await input.blob()).stream();
           var promises = [];
-          client = await client; //Get the client, so we can send progress updates
-          var progress = 0;
-          for await (const entry of (zipStream.pipeThrough(zipReader))) {
+          for await (const entry of (stream.pipeThrough(zipReader))) {
             if (entry.directory) continue;
             if (entry.filename.startsWith(".") || entry.filename.indexOf("/.") != -1) continue
-            promises.push(((entry) => rezipper(entry)
+            promises.push(((entry) => rezipper(entry,{onprogress})
               .then(response => new_cache.put(BASE + new_app + "/" + entry.filename, response))
-              .then(() => {progress += entry.compressedSize;client.postMessage({url:input.url,progress})})
             )(entry))
           }
           await Promise.all(promises);
@@ -432,11 +430,12 @@ async function request(input, options, navigate=false, client) {
           }
           // Handle regular puts
           if (!res) {
+            var onprogress = async p => (await client).postMessage({...p, url: input.url});
             if (input.headers.has("Content-Encoding")) {
-              res = await rezipper(input);
+              res = await rezipper(input,{onprogress});
             } else {
-              var body = input.body || (await input.blob()).steam();
-              res = new Response(body,{headers:headers || input.headers})
+              stream = stream.pipeThrough(progressTracker(onprogress));
+              res = new Response(stream,{headers:headers || input.headers})
             }
           }
           await cache.put(new Request(url,{method:"GET"}), res)

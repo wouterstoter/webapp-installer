@@ -89,7 +89,7 @@
                   <a href="#" id="more" class="card-link my-auto me-auto">More</a>
                   <a href="#" id="delete" class="btn btn-outline-danger ms-1" aria-label="Delete"><i class="bi bi-trash"></i></a>
                   <a href="#" id="download" class="btn btn-outline-secondary ms-1" aria-label="Download"><i class="bi bi-download"></i></a>
-                  <a href="#" id="install" class="btn btn-secondary ms-1">Install</a>
+                  <a href="#" id="install" class="btn btn-secondary ms-1 d-none">Install</a>
                   <a href="#" id="open" class="btn btn-primary ms-1">Open</a>
                 </div>
               </div>
@@ -192,7 +192,7 @@
         },{once:true})
         insertApp(clone,app);
       }
-      function addAppRegular(app) {
+      async function addAppRegular(app) {
         var template = document.querySelector("template#app_regular");
         var clone = document.importNode(template.content, true).firstElementChild;
         clone.setAttribute("app",app);
@@ -212,8 +212,51 @@
         clone.querySelector("#more").href = "more?app=" + encodeURIComponent(app);
         clone.querySelector("#download").href = app;
         clone.querySelector("#install").href = app + "/.manifest.json";
+        clone.querySelector("#install").onclick = function(e) {
+          e.preventDefault();
+          installPrompt.prompt();
+        }
         clone.querySelector("#open").href = app + "/";
         insertApp(clone,app);
+        var manifest = await getManifest(app);
+        if (manifest) {
+          clone.querySelector("#title").textContent = manifest.name || manifest.short_name || app;
+          if (clone.querySelector("#title").textContent != app) clone.querySelector("#app").textContent = app;
+          clone.querySelector("#description").textContent = manifest.description || "";
+          if (manifest.start_url) clone.querySelector("#open").href = new URL(manifest.start_url,manifest.base);
+          clone.querySelector("#install").classList.remove("d-none");
+          clone.onmouseenter = function() {
+            document.head.insertAdjacentHTML("afterbegin",`<link rel="manifest" href="${manifest.base}"/>`); 
+          }
+          clone.onmouseleave = function() {
+            document.querySelector("link[rel='manifest']").remove();
+          }
+          // TODO: Figure out how to do this on mobile
+        }
+      }
+      async function getManifest(app) {
+        var manifest = await fetch(app + "/.manifest.json")
+        var redirect = true;
+        if (manifest?.ok) redirect = false;
+        if (!manifest?.ok) manifest = await fetch(app + "/manifest.json")
+        if (!manifest?.ok) manifest = await fetch(app + "/manifest.webmanifest")
+        var mainpage = !manifest.ok ? await fetch(app + "/").then(a => a.ok ? a.text() : null) : null;
+        if (mainpage) {
+          mainpage = (new DOMParser()).parseFromString(mainpage,"text/html");
+          mainpage.head.insertAdjacentHTML("afterbegin",`<base href="${app}/">`)
+          manifest = mainpage.querySelector("link[rel='manifest']")?.href;
+          if (manifest) manifest = await fetch(manifest)
+        }
+        if (manifest?.ok) {
+          if (redirect) {
+            var cache = await caches.open(app);
+            cache.put(new Request(app + "/.manifest.json"),Response.redirect(manifest.url));
+          }
+          var url = manifest.url;
+          manifest = await manifest.json();
+          manifest.base = url;
+          return manifest;
+        }
       }
       function insertApp(clone,app) {
         var apps = document.querySelectorAll("#apps > div");
@@ -251,6 +294,13 @@
         }
       }
       loadApps();
+
+      let installPrompt = null;
+
+      window.addEventListener("beforeinstallprompt", (event) => {
+        event.preventDefault();
+        installPrompt = event;
+      });
     </script>
     <script src="libs/bootstrap.bundle.min.js" crossorigin="anonymous"/>
   </body>

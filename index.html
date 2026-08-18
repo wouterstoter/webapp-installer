@@ -40,68 +40,133 @@
             document.getElementById("openFile").onchange = function() {
               var file = this.files[0];
               if (!file) return;
-              navigator.serviceWorker.ready.then(async () => {
+              navigator.serviceWorker?.ready.then(async (registration) => {
+                const controller = new AbortController();
+                controller.id = Math.random().toString(16).slice(2);
+                controller.signal.onabort = () => {
+                  registration.active.postMessage({action:"ABORT",controller:controller.id}) 
+                };
+                addAppLoading(file.name,file.size,controller);
                 fetch(file.name, {
                   method: 'PUT',
                   headers:{
                     "Last-Modified": new Date(file.lastModified).toUTCString(), 
                     "Content-Type": file.type, 
                     "Content-Length": file.size,
+                    "X-Abort-Controller": controller.id
                   },
+                  signal:controller.signal,
                   body: file
                 })
+                .then(() => {
+                  registration.active.postMessage({action:"FINISH",controller:controller.id}) 
+                })
+                .catch(() => {
+                  document.querySelector(`[app="${file.name}"] .progress-bar`)?.classList.add("bg-danger")
+                })
               });
-              var progressBar = document.querySelector(".progress")
-              progressBar.setAttribute("aria-valuemax",file.size);
-              progressBar.children[0].style.width = "0%"
+            }
+            function addAppLoading(app,filesize,controller) {
+              var template = document.querySelector("template#app_loading");
+              var clone = document.importNode(template.content, true).firstElementChild;
+              clone.setAttribute("app",app);
+              clone.querySelector("#title").textContent = app;
+              var progressBar = clone.querySelector(".progress")
+              progressBar.setAttribute("aria-valuemax",filesize);
+              progressBar.children[0].style.width = "0%";
+              clone.querySelector("#cancel").addEventListener("click",async function() {
+                controller.abort();
+                progressBar.children[0].classList.add("bg-danger")
+                fetch(app, {method: 'DELETE'})
+                .then(() => {
+                  clone.classList.remove("show")
+                  window.setTimeout(() => {
+                    clone.remove();
+                  },150)
+                });
+              },{once:true})
+              insertApp(clone,app);
+            }
+            function insertApp(clone,app) {
+              var apps = document.querySelectorAll("#apps > div");
+              for (var i = 0; i <= apps.length; ++i) {
+                if (i == apps.length) {
+                  document.querySelector("#apps").appendChild(clone)
+                  break;
+                }
+                var app_i = apps[i].getAttribute("app")
+                if (app_i == app) {
+                  apps[i].insertAdjacentElement('beforebegin',clone)
+                  apps[i].querySelector("#cancel")?.click();
+                  apps[i].remove();
+                  break;
+                }
+                if (app_i.toLowerCase() == app.toLowerCase()) {
+                  if (app_i > app) {
+                    apps[i].insertAdjacentElement("beforebegin",clone)
+                    break;
+                  } else {
+                    continue;
+                  }
+                }
+                if (app_i > app) {
+                  apps[i].insertAdjacentElement("beforebegin",clone)
+                  break;
+                }
+              }
             }
           </script>
         </div>
         <hr class="col-3 col-md-2 mb-5"/>
         <h1>Apps</h1>
-        <div class="row row-cols-1 row-cols-md-2 g-4">
-          <div class="col">
-            <div class="card h-100">
-              <div class="card-body">
-                <div class="flex-row d-flex">
-                  <img class="card me-3 flex-grow-0 flex-shrink-0" width="64px" style="height: 64px !important;"/>
-                  <div class="flex-shrink-1 flex-grow-1">
-                    <small class="text-body-secondary">With faded secondary text</small>
-                    <h5 class="card-title">Special title treatment</h5>
-                  </div>
-                </div>
-                <p class="card-text text-truncate">With supporting text below as a natural lead-in to additional content.</p>
-              </div>
-              <div class="card-footer d-flex">
-                <a href="#" class="card-link my-auto me-auto">More</a>
-                <button type="button" class="btn btn-outline-danger ms-2" aria-label="Cancel"><i class="bi bi-trash"></i></button>
-                <a href="#" class="btn btn-secondary ms-1">Install</a>
-                <a href="#" class="btn btn-primary ms-1">Open</a>
-              </div>
-            </div>
-          </div>
-          <div class="col">
-            <div class="card h-100">
-              <div class="card-body">
-                <div class="flex-row d-flex">
-                  <div class="card me-3 flex-grow-0 flex-shrink-0" style="height: 64px;width:64px;">
-                    <div class="spinner-border text-primary m-auto" role="status">
-                      <span class="visually-hidden">Loading...</span>
+        <div id="apps" class="row row-cols-1 row-cols-md-2 g-4">
+          <template id="app_regular">
+            <div class="col">
+              <div class="card h-100">
+                <div class="card-body">
+                  <div class="flex-row d-flex">
+                    <img class="card me-3 flex-grow-0 flex-shrink-0" width="64px" style="height: 64px !important;"/>
+                    <div class="flex-shrink-1 flex-grow-1">
+                      <small class="text-body-secondary">With faded secondary text</small>
+                      <h5 class="card-title">Special title treatment</h5>
                     </div>
                   </div>
-                  <div class="flex-shrink-1 flex-grow-1">
-                    <h5 class="card-title">Special title treatment.zip</h5>
-                  </div>
+                  <p class="card-text text-truncate">With supporting text below as a natural lead-in to additional content.</p>
                 </div>
-              </div>
-              <div class="card-footer d-flex">
-                <div class="progress w-100 m-auto" role="progressbar" aria-label="Animated striped example" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
-                  <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 0%"></div>
+                <div class="card-footer d-flex">
+                  <a href="#" class="card-link my-auto me-auto">More</a>
+                  <button type="button" class="btn btn-outline-danger ms-1" aria-label="Delete"><i class="bi bi-trash"></i></button>
+                  <button type="button" class="btn btn-outline-secondary ms-1" aria-label="Downoad"><i class="bi bi-download"></i></button>
+                  <a href="#" class="btn btn-secondary ms-1">Install</a>
+                  <a href="#" class="btn btn-primary ms-1">Open</a>
                 </div>
-                <button type="button" class="btn px-0 ms-2" aria-label="Cancel"><i class="bi bi-x-lg"></i></button>
               </div>
             </div>
-          </div>
+          </template>
+          <template id="app_loading">
+            <div class="col fade show">
+              <div class="card h-100">
+                <div class="card-body">
+                  <div class="flex-row d-flex">
+                    <div class="card me-3 flex-grow-0 flex-shrink-0" style="height: 64px;width:64px;">
+                      <div class="spinner-border text-primary m-auto" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                      </div>
+                    </div>
+                    <div class="flex-shrink-1 flex-grow-1">
+                      <h5 id="title" class="card-title"></h5>
+                    </div>
+                  </div>
+                </div>
+                <div class="card-footer d-flex">
+                  <div class="progress w-100 m-auto" role="progressbar" aria-label="Animated striped example" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 0%"></div>
+                  </div>
+                  <button id="cancel" type="button" class="btn px-0 ms-2" aria-label="Cancel"><i class="bi bi-x-lg"></i></button>
+                </div>
+              </div>
+            </div>
+          </template>
         </div>
         <footer class="pt-5 my-5 text-body-secondary border-top">Created by Wouter Stoter · © 2026 </footer>
       </main>
@@ -142,11 +207,13 @@
         }, function(err) {
           console.error('ServiceWorker registration failed: ', err);
         });
+        var BASE = new URL(".",document.location.href);
         navigator.serviceWorker.addEventListener('message', (event) => {
           if ("progress" in event.data) {
-            var progressBar = document.querySelector(".progress")
-            progressBar.setAttribute("aria-valuenow",event.data.progress);
-            progressBar.children[0].style.width = (event.data.progress / progressBar.getAttribute("aria-valuemax") * 100).toFixed(2) + "%"
+            var app = (new URL(event.data.url)).pathname.slice(BASE.pathname.length).split("/")[0];
+            var progressBar = document.querySelector(`[app="${app}"] .progress`);
+            progressBar.setAttribute("aria-valuenow",event.data.received - -progressBar.getAttribute("aria-valuenow"));
+            progressBar.children[0].style.width = (progressBar.getAttribute("aria-valuenow") / progressBar.getAttribute("aria-valuemax") * 100).toFixed(2) + "%"
           }
         });
       }

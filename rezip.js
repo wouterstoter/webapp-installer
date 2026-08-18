@@ -14,6 +14,8 @@ export async function rezipper(input,options = {}) {
     let unzip = true;
     if (input instanceof Request) unzip = false;
     [input, options, headers] = await HeadersToOptions(input,options);
+    let signal = options.signal;
+    delete options.signal;
     if (!options.passThrough) {
         if (unzip && options.encrypted && !options.password) throw new Error(zip.ERR_ENCRYPTED);
         var encodings = headers.get("Content-Encoding")?.toLowerCase().split(" ");
@@ -72,8 +74,8 @@ export async function rezipper(input,options = {}) {
         let newKey = "x-zipjs-" + key.replace(/\W+/g, " ").split(/ |\B(?=[A-Z])/).map(word => word.toLowerCase()).join("-")
         headers.set(newKey, Number(options[key]) || options[key])
     }
-    if (onprogress) {
-        input = input.pipeThrough(progressTracker(p => onprogress({...p, total: Number(headers.get("Content-Length"))})));
+    if (onprogress || signal) {
+        input = input.pipeThrough(progressTracker(p => onprogress({...p, total: Number(headers.get("Content-Length"))}),signal));
     }
     return new Response(input,{headers});
 }
@@ -164,12 +166,18 @@ export async function EntryToStream(unzip,input,options) {
     return input
 }
 
-export function progressTracker(onProgress) {
+export function progressTracker(onProgress,signal) {
   let progress = 0;
+  let abort = (controller) => {controller.error(signal.reason ?? new DOMException('Aborted', 'AbortError'));}
   return new TransformStream({
+    start(controller) {
+      if (signal.aborted) return abort(controller);
+      signal.addEventListener('abort', () => abort(controller), { once: true });
+    },
     transform(chunk, controller) {
+      if (signal.aborted) return abort(controller);
       progress += chunk.byteLength;
-      onProgress({ received: chunk.byteLength, progress });
+      if (onProgress) onProgress({ received: chunk.byteLength, progress });
       controller.enqueue(chunk);
     },
   });

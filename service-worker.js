@@ -109,10 +109,12 @@ self.addEventListener('activate', function(event) {
   });
 })();
 
-
+const uploadControllers = new Map();
 self.addEventListener('fetch', event => {
   var r = event.request;
-  var referrer = r.referrer ? new URL(r.referrer) : ""
+
+  var referrer = r.referrer ? new URL(r.referrer) : "";
+  console.log(event);
   event.respondWith((async () => {
     var client;
     if (event.clientId) client = self.clients.get(event.clientId) // still a promise;
@@ -131,11 +133,29 @@ self.addEventListener('fetch', event => {
     }
     if (url != r.url) r = new Request(url, r)
 
-    return request(r, null, navigate, client)
+    var signal = r.signal  // Doesn't work yet, not implemented that way in broswers, workaround needed
+    if (r.headers.has("X-Abort-Controller")) {
+      var id = event.clientId + "#" + r.headers.get("X-Abort-Controller");
+      var controller;
+      if (uploadControllers.has(id)) {
+        controller = uploadControllers.get(id);
+      } else {
+        controller = new AbortController();
+        uploadControllers.set(id,controller);
+      }
+      signal = controller.signal;
+    }
+    return request(r, null, navigate, client, signal);
   })());
 });
 
 self.addEventListener('message', (event) => {
+  if (event.data?.action?.toUpperCase() == "ABORT") {
+    uploadControllers.get(event.source?.id + "#" + event.data.controller)?.abort();
+    return
+  } else if (event.data?.action?.toUpperCase() == "FINISH") {
+    uploadControllers.delete(event.source?.id + "#" + event.data.controller);
+  }
   var url = event.source.url.split('#')[0].split("?")[0];
   var app = url.slice(BASE.href.length).split(AppExtRegEx)
   if (app.length > 1) return;
@@ -232,9 +252,10 @@ function wURL(url,base) {
  * @param {RequestInit | Request | null} [options] - Additional options for the request
  * @param {Boolean} [navigate=false] - Indicates that the request is a navigation
  * @param {Promise} [client] - The page that made the request, which can be reported back to
+ * @param {AbortSignal} [signal] - The page that made the request, which can be reported back to
  * @returns {Response} The response to the request
  */
-async function request(input, options, navigate=false, client) {
+async function request(input, options, navigate=false, client, signal) {
   var app;
   try {
     let url;
@@ -386,7 +407,7 @@ async function request(input, options, navigate=false, client) {
           responses = await cache.matchAll(new Request(index_url,input),{ignoreSearch: true, ignoreMethod: true, ignoreVary: true});
         }
         var response = responses[0];
-        if (response && response.headers.has("Content-Encoding")) response = await rezipper(response,{password}).catch(e => {
+        if (response && response.headers.has("Content-Encoding")) response = await rezipper(response,{password,signal}).catch(e => {
           if (e.message == zip.ERR_ENCRYPTED || e.message == zip.ERR_INVALID_PASSWORD) return errorpage(401,navigate ? app : null);
           console.error(e)
           return errorpage(500,navigate ? app : null);
@@ -412,8 +433,9 @@ async function request(input, options, navigate=false, client) {
           for await (const entry of (stream.pipeThrough(zipReader))) {
             if (entry.directory) continue;
             if (entry.filename.startsWith(".") || entry.filename.indexOf("/.") != -1) continue
-            promises.push(((entry) => rezipper(entry,{onprogress})
+            promises.push(((entry) => rezipper(entry,{onprogress,signal})
               .then(response => new_cache.put(BASE + new_app + "/" + entry.filename, response))
+              .then(() => console.log(signal))
             )(entry))
           }
           await Promise.all(promises);
@@ -432,7 +454,7 @@ async function request(input, options, navigate=false, client) {
           if (!res) {
             var onprogress = async p => (await client).postMessage({...p, url: input.url});
             if (input.headers.has("Content-Encoding")) {
-              res = await rezipper(input,{onprogress});
+              res = await rezipper(input,{onprogress,signal});
             } else {
               stream = stream.pipeThrough(progressTracker(onprogress));
               res = new Response(stream,{headers:headers || input.headers})
@@ -445,6 +467,14 @@ async function request(input, options, navigate=false, client) {
         }
         return errorpage(501,navigate ? app : null); 
         break;
+      case "DELETE":
+        var exists = await cache.delete(new Request(url,{method:"GET"})); // Delete the file if it already exists
+        if (url.pathname.endsWith(".zip") || url.pathname.endsWith(".app") || url.pathname.endsWith(".har")) {
+          var zippath = url.pathname.slice(BASE.pathname.length);
+          exists = (await caches.delete(zippath)) || exists;
+        }
+        if (exists) return new Response(null,{status:204,statusText:"No content"});
+        return errorpage(404,navigate ? app : null);
       default:
         return errorpage(405,navigate ? app : null);
     }

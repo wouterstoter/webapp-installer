@@ -59,7 +59,8 @@
                   body: file
                 })
                 .then(() => {
-                  registration.active.postMessage({action:"FINISH",controller:controller.id}) 
+                  registration.active.postMessage({action:"FINISH",controller:controller.id});
+                  addAppRegular(file.name);
                 })
                 .catch(() => {
                   document.querySelector(`[app="${file.name}"] .progress-bar`)?.classList.add("bg-danger")
@@ -74,7 +75,7 @@
               var progressBar = clone.querySelector(".progress")
               progressBar.setAttribute("aria-valuemax",filesize);
               progressBar.children[0].style.width = "0%";
-              clone.querySelector("#cancel").addEventListener("click",async function() {
+              clone.querySelector("#cancel").addEventListener("click",function() {
                 controller.abort();
                 progressBar.children[0].classList.add("bg-danger")
                 fetch(app, {method: 'DELETE'})
@@ -87,6 +88,27 @@
               },{once:true})
               insertApp(clone,app);
             }
+            function addAppRegular(app) {
+              var template = document.querySelector("template#app_regular");
+              var clone = document.importNode(template.content, true).firstElementChild;
+              clone.setAttribute("app",app);
+              clone.querySelector("#title").textContent = app;
+              clone.querySelector("#delete").href = app;
+              clone.querySelector("#delete").addEventListener("click",function(e) {
+                e.preventDefault()
+                fetch(this.href, {method: 'DELETE'})
+                .then(() => {
+                  clone.classList.add("fade")
+                  window.setTimeout(() => {
+                    clone.remove();
+                  },150)
+                });
+              },{once:true});
+              clone.querySelector("#download").href = app;
+              clone.querySelector("#install").href = app + "/.manifest.json";
+              clone.querySelector("#open").href = app + "/";
+              insertApp(clone,app);
+            }
             function insertApp(clone,app) {
               var apps = document.querySelectorAll("#apps > div");
               for (var i = 0; i <= apps.length; ++i) {
@@ -97,7 +119,7 @@
                 var app_i = apps[i].getAttribute("app")
                 if (app_i == app) {
                   apps[i].insertAdjacentElement('beforebegin',clone)
-                  apps[i].querySelector("#cancel")?.click();
+                  if (clone.querySelector(".progress")) apps[i].querySelector("#cancel")?.click();
                   apps[i].remove();
                   break;
                 }
@@ -115,6 +137,14 @@
                 }
               }
             }
+            async function loadApps() {
+              var keys = await caches.keys();
+              for (i = 0; i < keys.length; ++i) {
+                if (!keys[i].toLowerCase().endsWith(".zip") && !keys[i].toLowerCase().endsWith(".app") && !keys[i].toLowerCase().endsWith(".har")) continue
+                addAppRegular(keys[i]);
+              }
+            }
+            loadApps();
           </script>
         </div>
         <hr class="col-3 col-md-2 mb-5"/>
@@ -123,22 +153,22 @@
           <template id="app_regular">
             <div class="col">
               <div class="card h-100">
-                <div class="card-body">
+                <div class="card-body overflow-hidden">
                   <div class="flex-row d-flex">
                     <img class="card me-3 flex-grow-0 flex-shrink-0" width="64px" style="height: 64px !important;"/>
                     <div class="flex-shrink-1 flex-grow-1">
-                      <small class="text-body-secondary">With faded secondary text</small>
-                      <h5 class="card-title">Special title treatment</h5>
+                      <small id="app" class="text-body-secondary"></small>
+                      <h5 id="title" class="card-title"></h5>
                     </div>
                   </div>
-                  <p class="card-text text-truncate">With supporting text below as a natural lead-in to additional content.</p>
+                  <p id="description" class="card-text text-truncate"></p>
                 </div>
                 <div class="card-footer d-flex">
-                  <a href="#" class="card-link my-auto me-auto">More</a>
-                  <button type="button" class="btn btn-outline-danger ms-1" aria-label="Delete"><i class="bi bi-trash"></i></button>
-                  <button type="button" class="btn btn-outline-secondary ms-1" aria-label="Downoad"><i class="bi bi-download"></i></button>
-                  <a href="#" class="btn btn-secondary ms-1">Install</a>
-                  <a href="#" class="btn btn-primary ms-1">Open</a>
+                  <a href="#" id="more" class="card-link my-auto me-auto">More</a>
+                  <a href="#" id="delete" class="btn btn-outline-danger ms-1" aria-label="Delete"><i class="bi bi-trash"></i></a>
+                  <a href="#" id="download" class="btn btn-outline-secondary ms-1" aria-label="Download"><i class="bi bi-download"></i></a>
+                  <a href="#" id="install" class="btn btn-secondary ms-1">Install</a>
+                  <a href="#" id="open" class="btn btn-primary ms-1">Open</a>
                 </div>
               </div>
             </div>
@@ -146,7 +176,7 @@
           <template id="app_loading">
             <div class="col fade show">
               <div class="card h-100">
-                <div class="card-body">
+                <div class="card-body overflow-hidden">
                   <div class="flex-row d-flex">
                     <div class="card me-3 flex-grow-0 flex-shrink-0" style="height: 64px;width:64px;">
                       <div class="spinner-border text-primary m-auto" role="status">

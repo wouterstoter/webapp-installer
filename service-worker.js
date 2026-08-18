@@ -114,7 +114,6 @@ self.addEventListener('fetch', event => {
   var r = event.request;
 
   var referrer = r.referrer ? new URL(r.referrer) : "";
-  console.log(event);
   event.respondWith((async () => {
     var client;
     if (event.clientId) client = self.clients.get(event.clientId) // still a promise;
@@ -314,7 +313,8 @@ async function request(input, options, navigate=false, client, signal) {
           const zipper = new zip.ZipWriterStream();
           var headers = new Headers(responses[0]?.headers);
           headers.set("Content-Type","application/zip");
-          var response = new Response(zipper.readable,{headers})
+          var contentLength = 0;
+          var uncompressedSize = 0;
           var promises = files.map(f => {
             // Skip files and folders whose name starts with .
             if (("/" + f.url.slice((BASE + zippath).length)).split("#")[0].split("?")[0].indexOf("/.") != -1) return
@@ -322,6 +322,8 @@ async function request(input, options, navigate=false, client, signal) {
             .then(response => HeadersToOptions(response))
             .then(([body, options, headers]) => {
               var encoding = headers.get("Content-Encoding")?.split(" ") || [];
+              contentLength += Number(headers.get("Content-Length")) || 0;
+              uncompressedSize += Number(headers.get("X-Zipjs-Uncompressed-Size")) || Number(headers.get("Content-Length")) || 0;
               for (var i = 0; i < encoding.length; ++i) {
                 if (encoding[i] == "zipjs") break;
                 body = body.pipeThrough(new DecompressionStream(encoding[i]))
@@ -334,6 +336,9 @@ async function request(input, options, navigate=false, client, signal) {
           });
           await Promise.all(promises);
           zipper.close();
+          headers.set("Content-Length",contentLength);
+          headers.set("uncompressedSize",uncompressedSize);
+          var response = new Response(zipper.readable,{headers})
           return response;
         }
         if (responses.length == 0 && url.pathname.endsWith("/")) {
@@ -435,7 +440,6 @@ async function request(input, options, navigate=false, client, signal) {
             if (entry.filename.startsWith(".") || entry.filename.indexOf("/.") != -1) continue
             promises.push(((entry) => rezipper(entry,{onprogress,signal})
               .then(response => new_cache.put(BASE + new_app + "/" + entry.filename, response))
-              .then(() => console.log(signal))
             )(entry))
           }
           await Promise.all(promises);
@@ -528,7 +532,7 @@ async function errorpage(status,app) {
       text = text.replace(/<head[^>]*>/i,`$&<base href="${encodeURI(url)}"/>`);
       if (status == 401) text = text.replace(/<\/body>/i,authscript + '$&');
       body = text;
-    } catch(e) {console.log(e)}
+    } catch(e) {console.warn(e)}
   }
   if (status == 401 && !body) body = `<!DOCTYPE html><html><head>${authscript}</head><body></body></html>`;
   var headers = new Headers(response?.headers);

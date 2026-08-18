@@ -30,12 +30,12 @@ export async function rezipper(input,options = {}) {
                     const iterator = zipStream.pipeThrough(zipReader).values();
                     const { value: entry } = await iterator.next();
                     await iterator.return(); // Clean up the stream so the end of directory doesn't have to be written
-                    if (!unzip && entry.compressionMethod == 0  && !entry.encrypted) {
-                        // If we're zipping, but it's not compressed nor encrypted, we can remove mentions of encoding
-                        encodings.splice(i,1);
-                        i--;
-                    }
                     input = entry;
+                }
+                if (!unzip && input.compressionMethod == 0  && !input.encrypted) {
+                    // If we're zipping, but it's not compressed nor encrypted, we can remove mentions of encoding
+                    encodings.splice(i,1);
+                    i--;
                 }
                 [input, options, headers] = [await EntryToStream(unzip,input,options), ...EntryToOptions(unzip,input,headers)];
             } else {

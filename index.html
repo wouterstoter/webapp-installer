@@ -67,84 +67,6 @@
                 })
               });
             }
-            function addAppLoading(app,filesize,controller) {
-              var template = document.querySelector("template#app_loading");
-              var clone = document.importNode(template.content, true).firstElementChild;
-              clone.setAttribute("app",app);
-              clone.querySelector("#title").textContent = app;
-              var progressBar = clone.querySelector(".progress")
-              progressBar.setAttribute("aria-valuemax",filesize);
-              progressBar.children[0].style.width = "0%";
-              clone.querySelector("#cancel").addEventListener("click",function() {
-                controller.abort();
-                progressBar.children[0].classList.add("bg-danger")
-                fetch(app, {method: 'DELETE'})
-                .then(() => {
-                  clone.classList.remove("show")
-                  window.setTimeout(() => {
-                    clone.remove();
-                  },150)
-                });
-              },{once:true})
-              insertApp(clone,app);
-            }
-            function addAppRegular(app) {
-              var template = document.querySelector("template#app_regular");
-              var clone = document.importNode(template.content, true).firstElementChild;
-              clone.setAttribute("app",app);
-              clone.querySelector("#title").textContent = app;
-              clone.querySelector("#delete").href = app;
-              clone.querySelector("#delete").addEventListener("click",function(e) {
-                e.preventDefault()
-                fetch(this.href, {method: 'DELETE'})
-                .then(() => {
-                  clone.classList.add("fade")
-                  window.setTimeout(() => {
-                    clone.remove();
-                  },150)
-                });
-              },{once:true});
-              clone.querySelector("#download").href = app;
-              clone.querySelector("#install").href = app + "/.manifest.json";
-              clone.querySelector("#open").href = app + "/";
-              insertApp(clone,app);
-            }
-            function insertApp(clone,app) {
-              var apps = document.querySelectorAll("#apps > div");
-              for (var i = 0; i <= apps.length; ++i) {
-                if (i == apps.length) {
-                  document.querySelector("#apps").appendChild(clone)
-                  break;
-                }
-                var app_i = apps[i].getAttribute("app")
-                if (app_i == app) {
-                  apps[i].insertAdjacentElement('beforebegin',clone)
-                  if (clone.querySelector(".progress")) apps[i].querySelector("#cancel")?.click();
-                  apps[i].remove();
-                  break;
-                }
-                if (app_i.toLowerCase() == app.toLowerCase()) {
-                  if (app_i > app) {
-                    apps[i].insertAdjacentElement("beforebegin",clone)
-                    break;
-                  } else {
-                    continue;
-                  }
-                }
-                if (app_i > app) {
-                  apps[i].insertAdjacentElement("beforebegin",clone)
-                  break;
-                }
-              }
-            }
-            async function loadApps() {
-              var keys = await caches.keys();
-              for (i = 0; i < keys.length; ++i) {
-                if (!keys[i].toLowerCase().endsWith(".zip") && !keys[i].toLowerCase().endsWith(".app") && !keys[i].toLowerCase().endsWith(".har")) continue
-                addAppRegular(keys[i]);
-              }
-            }
-            loadApps();
           </script>
         </div>
         <hr class="col-3 col-md-2 mb-5"/>
@@ -247,6 +169,86 @@
           }
         });
       }
+    </script>
+    <script>
+      function addAppLoading(app,filesize,controller) {
+        var template = document.querySelector("template#app_loading");
+        var clone = document.importNode(template.content, true).firstElementChild;
+        clone.setAttribute("app",app);
+        clone.querySelector("#title").textContent = app;
+        var progressBar = clone.querySelector(".progress")
+        progressBar.setAttribute("aria-valuemax",filesize);
+        progressBar.children[0].style.width = "0%";
+        clone.querySelector("#cancel").addEventListener("click",function() {
+          controller.abort();
+          progressBar.children[0].classList.add("bg-danger")
+          fetch(app, {method: 'DELETE'})
+          .then(() => {
+            clone.classList.remove("show")
+            window.setTimeout(() => {
+              clone.remove();
+            },150)
+          });
+        },{once:true})
+        insertApp(clone,app);
+      }
+      function addAppRegular(app) {
+        var template = document.querySelector("template#app_regular");
+        var clone = document.importNode(template.content, true).firstElementChild;
+        clone.setAttribute("app",app);
+        clone.querySelector("#title").textContent = app;
+        clone.querySelector("#delete").href = app;
+        clone.querySelector("#delete").addEventListener("click",function(e) {
+          e.preventDefault()
+          fetch(this.href, {method: 'DELETE'})
+          .then(() => {
+            clone.classList.add("fade")
+            window.setTimeout(() => {
+              clone.remove();
+            },150)
+          });
+        },{once:true});
+        clone.querySelector("#download").href = app;
+        clone.querySelector("#install").href = app + "/.manifest.json";
+        clone.querySelector("#open").href = app + "/";
+        insertApp(clone,app);
+      }
+      function insertApp(clone,app) {
+        var apps = document.querySelectorAll("#apps > div");
+        for (var i = 0; i <= apps.length; ++i) {
+          if (i == apps.length) {
+            document.querySelector("#apps").appendChild(clone)
+            break;
+          }
+          var app_i = apps[i].getAttribute("app")
+          if (app_i == app) {
+            apps[i].insertAdjacentElement('beforebegin',clone)
+            if (clone.querySelector(".progress")) apps[i].querySelector("#cancel")?.click();
+            apps[i].remove();
+            break;
+          }
+          if (app_i.toLowerCase() == app.toLowerCase()) {
+            if (app_i > app) {
+              apps[i].insertAdjacentElement("beforebegin",clone)
+              break;
+            } else {
+              continue;
+            }
+          }
+          if (app_i > app) {
+            apps[i].insertAdjacentElement("beforebegin",clone)
+            break;
+          }
+        }
+      }
+      async function loadApps() {
+        var keys = await caches.keys();
+        for (i = 0; i < keys.length; ++i) {
+          if (!keys[i].toLowerCase().endsWith(".zip") && !keys[i].toLowerCase().endsWith(".app") && !keys[i].toLowerCase().endsWith(".har")) continue
+          addAppRegular(decodeURI(keys[i]));
+        }
+      }
+      loadApps();
     </script>
     <script src="libs/bootstrap.bundle.min.js" crossorigin="anonymous"/>
   </body>

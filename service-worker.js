@@ -132,7 +132,7 @@ self.addEventListener('fetch', event => {
     }
     if (url != r.url) r = new Request(url, r)
 
-    var signal = r.signal  // Doesn't work yet, not implemented that way in broswers, workaround needed
+    var signal// = r.signal  // Doesn't work yet, not implemented that way in broswers, workaround needed
     if (r.headers.has("X-Abort-Controller")) {
       var id = event.clientId + "#" + r.headers.get("X-Abort-Controller");
       var controller;

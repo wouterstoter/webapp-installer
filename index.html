@@ -77,7 +77,7 @@
               <div class="card h-100">
                 <div class="card-body overflow-hidden">
                   <div class="flex-row d-flex">
-                    <img class="card me-3 flex-grow-0 flex-shrink-0" width="64px" style="height: 64px !important;"/>
+                    <img id="icon" class="card me-3 flex-grow-0 flex-shrink-0" style="height: 64px;width:64px;padding:8px;"/>
                     <div class="flex-shrink-1 flex-grow-1">
                       <small id="app" class="text-body-secondary"></small>
                       <h5 id="title" class="card-title"></h5>
@@ -208,6 +208,8 @@
             },150)
           });
         },{once:true});
+        clone.querySelector("#icon").src = app + "/favicon.ico";
+        clone.querySelector("#more").href = "more?app=" + encodeURIComponent(app);
         clone.querySelector("#download").href = app;
         clone.querySelector("#install").href = app + "/.manifest.json";
         clone.querySelector("#open").href = app + "/";

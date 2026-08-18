@@ -224,12 +224,11 @@
           if (clone.querySelector("#title").textContent != app) clone.querySelector("#app").textContent = app;
           clone.querySelector("#description").textContent = manifest.description || "";
           if (manifest.start_url) clone.querySelector("#open").href = new URL(manifest.start_url,manifest.base);
-          clone.querySelector("#install").classList.remove("d-none");
-          clone.onmouseenter = function() {
-            document.head.insertAdjacentHTML("afterbegin",`<link rel="manifest" href="${manifest.base}"/>`); 
-          }
-          clone.onmouseleave = function() {
-            document.querySelector("link[rel='manifest']").remove();
+          if ('onbeforeinstallprompt' in window) clone.querySelector("#install").classList.remove("d-none");
+          clone.querySelector("#install").onclick = function(e) {
+            e.preventDefault();
+            document.head.insertAdjacentHTML("afterbegin",`<link rel="manifest" href="${manifest.base}"/>`);
+            setTimeout(() => {document.querySelector("link[rel='manifest']").remove()},1000) 
           }
           // TODO: Figure out how to do this on mobile
         }
@@ -299,7 +298,7 @@
 
       window.addEventListener("beforeinstallprompt", (event) => {
         event.preventDefault();
-        installPrompt = event;
+        event.prompt();
       });
     </script>
     <script src="libs/bootstrap.bundle.min.js" crossorigin="anonymous"/>

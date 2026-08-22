@@ -67,6 +67,41 @@
                 })
               });
             }
+            document.getElementById("openFolder").onchange = async function() {
+              var files = [...this.files];
+              var app = files[0].webkitRelativePath.split("/")[0];
+              if (!app.toLowerCase().endsWith(".app")) app += ".app";
+              var appsize = files.reduce((acc,cur) => acc + cur.size,0)
+              var registration = await navigator.serviceWorker?.ready;
+              const controller = new AbortController();
+              controller.id = Math.random().toString(16).slice(2);
+              controller.signal.onabort = () => {
+                registration.active.postMessage({action:"ABORT",controller:controller.id}) 
+              };
+              addAppLoading(app,appsize,controller);
+              await fetch(app, {method: 'PUT',headers:{"X-Zipjs-Pass-Through": 1,"X-Abort-Controller": controller.id},signal:controller.signal});
+              var promises = files.map(file => {
+                var filename = file.webkitRelativePath.split('/');
+                filename[0] = app;
+                filename = filename.join('/');
+                return fetch(filename, {
+                  method: 'PUT',
+                  headers:{
+                    "Last-Modified": new Date(file.lastModified).toUTCString(), 
+                    "Content-Type": file.type, 
+                    "Content-Length": file.size,
+                    "X-Abort-Controller": controller.id
+                  },
+                  signal:controller.signal,
+                  body: file
+                })
+              })
+              await Promise.all(promises).catch(() => {
+                document.querySelector(`[app="${file.name}"] .progress-bar`)?.classList.add("bg-danger")
+              })
+              registration.active.postMessage({action:"FINISH",controller:controller.id});
+              addAppRegular(app);
+            }
           </script>
         </div>
         <hr class="col-3 col-md-2 mb-5"/>

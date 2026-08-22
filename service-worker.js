@@ -330,6 +330,9 @@ async function request(input, options, navigate=false, client, signal) {
                 encoding.splice(i,1);
                 i--;
               }
+              if (encoding.indexOf("zipjs") == -1) {
+                options.compressionMethod = 0;
+              }
               options.passThrough = true;
               body.pipeTo(zipper.writable(f.url.slice((BASE + zippath).length),options));
             });
@@ -433,16 +436,18 @@ async function request(input, options, navigate=false, client, signal) {
           var new_app = url.pathname.slice(BASE.pathname.length);
           var exists = await caches.delete(new_app);
           var new_cache = await caches.open(new_app);
-          const zipReader = new zip.ZipReaderStream({passThrough: true});
-          var promises = [];
-          for await (const entry of (stream.pipeThrough(zipReader))) {
-            if (entry.directory) continue;
-            if (entry.filename.startsWith(".") || entry.filename.indexOf("/.") != -1) continue
-            promises.push(((entry) => rezipper(entry,{onprogress,signal})
-              .then(response => new_cache.put(BASE + new_app + "/" + entry.filename, response))
-            )(entry))
+          if (!Number(input.headers.get("X-Zipjs-Pass-Through") || "0")) {
+            const zipReader = new zip.ZipReaderStream({passThrough: true});
+            var promises = [];
+            for await (const entry of (stream.pipeThrough(zipReader))) {
+              if (entry.directory) continue;
+              if (entry.filename.startsWith(".") || entry.filename.indexOf("/.") != -1) continue
+              promises.push(((entry) => rezipper(entry,{onprogress,signal})
+                .then(response => new_cache.put(BASE + new_app + "/" + entry.filename, response))
+              )(entry))
+            }
+            await Promise.all(promises);
           }
-          await Promise.all(promises);
           if (exists) return new Response(null,{status:200,statusText:"OK",headers:{Location:url.href}})
           return new Response(null,{status:201,statusText:"Created",headers:{Location:url.href}})
         } else {

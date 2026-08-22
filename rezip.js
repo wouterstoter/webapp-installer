@@ -171,11 +171,11 @@ export function progressTracker(onProgress,signal) {
   let abort = (controller) => {controller.error(signal.reason ?? new DOMException('Aborted', 'AbortError'));}
   return new TransformStream({
     start(controller) {
-      if (signal.aborted) return abort(controller);
-      signal.addEventListener('abort', () => abort(controller), { once: true });
+      if (signal?.aborted) return abort(controller);
+      signal?.addEventListener('abort', () => abort(controller), { once: true });
     },
     transform(chunk, controller) {
-      if (signal.aborted) return abort(controller);
+      if (signal?.aborted) return abort(controller);
       progress += chunk.byteLength;
       if (onProgress) onProgress({ received: chunk.byteLength, progress });
       controller.enqueue(chunk);

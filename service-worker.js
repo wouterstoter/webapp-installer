@@ -481,6 +481,13 @@ async function request(input, options, navigate=false, client, signal) {
         if (url.pathname.endsWith(".zip") || url.pathname.endsWith(".app") || url.pathname.endsWith(".har")) {
           var zippath = url.pathname.slice(BASE.pathname.length);
           exists = (await caches.delete(zippath)) || exists;
+        } else if (url.pathname.endsWith("/")) {
+          var keys = (await cache.keys()).filter(k => k.url.startsWith(url.origin + url.pathname))
+          exists = exists || keys.length > 0;
+          Promise.all(keys.map(k => cache.delete(k)));
+          var apps = (await caches.keys()).filter(k => APP_EXTS.indexOf(k.toLowerCase().split(".").slice(-1)[0]) != -1 && k.startsWith(url.pathname.slice(BASE.pathname.length)))
+          exists = exists || apps.length > 0;
+          Promise.all(apps.map(k => caches.delete(k)));
         }
         if (exists) return new Response(null,{status:204,statusText:"No content"});
         return errorpage(404,navigate ? app : null);

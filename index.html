@@ -40,6 +40,9 @@
             document.getElementById("openFile").onchange = function() {
               var file = this.files[0];
               if (!file) return;
+              openFile(file);
+            }
+            function openFile(file) {
               navigator.serviceWorker?.ready.then(async (registration) => {
                 const controller = new AbortController();
                 controller.id = Math.random().toString(16).slice(2);
@@ -68,10 +71,10 @@
               });
             }
             document.getElementById("openFolder").onchange = async function() {
-              var files = [...this.files];
+              var files = [...this.files].filter(file => file.name.indexOf("/.") == -1);
               var app = files[0].webkitRelativePath.split("/")[0];
               if (!app.toLowerCase().endsWith(".app")) app += ".app";
-              var appsize = files.reduce((acc,cur) => acc + cur.size,0)
+              var appsize = files.reduce((acc,cur) => acc + cur.size,0);
               var registration = await navigator.serviceWorker?.ready;
               const controller = new AbortController();
               controller.id = Math.random().toString(16).slice(2);
@@ -97,7 +100,7 @@
                 })
               })
               await Promise.all(promises).catch(() => {
-                document.querySelector(`[app="${file.name}"] .progress-bar`)?.classList.add("bg-danger")
+                document.querySelector(`[app="${app}"] .progress-bar`)?.classList.add("bg-danger")
               })
               registration.active.postMessage({action:"FINISH",controller:controller.id});
               addAppRegular(app);
@@ -198,6 +201,7 @@
         navigator.serviceWorker.addEventListener('message', (event) => {
           if ("progress" in event.data) {
             var app = (new URL(event.data.url)).pathname.slice(BASE.pathname.length).split("/")[0];
+            debugger;
             var progressBar = document.querySelector(`[app="${app}"] .progress`);
             progressBar.setAttribute("aria-valuenow",event.data.received - -progressBar.getAttribute("aria-valuenow"));
             progressBar.children[0].style.width = (progressBar.getAttribute("aria-valuenow") / progressBar.getAttribute("aria-valuemax") * 100).toFixed(2) + "%"
@@ -226,6 +230,7 @@
           });
         },{once:true})
         insertApp(clone,app);
+        return clone;
       }
       async function addAppRegular(app) {
         var template = document.querySelector("template#app_regular");
@@ -267,6 +272,7 @@
           }
           // TODO: Figure out how to do this on mobile
         }
+        return clone;
       }
       async function getManifest(app) {
         var manifest = await fetch(app + "/.manifest.json")
@@ -335,6 +341,91 @@
         event.preventDefault();
         event.prompt();
       });
+
+      window.addEventListener("dragover", (e) => {
+        const fileItems = [...e.dataTransfer.items].filter(
+          (item) => item.kind === "file",
+        );
+        if (fileItems.length > 0) {
+          e.preventDefault();
+          if (fileItems.some((item) => ["application/x-zip-compressed",""].indexOf(item.type) != -1)) {
+            e.dataTransfer.dropEffect = "copy";
+          } else {
+            e.dataTransfer.dropEffect = "none";
+          }
+        }
+      });
+      window.addEventListener("drop", async (e) => {
+        e.preventDefault();
+        var registration = await navigator.serviceWorker?.ready;
+        [...e.dataTransfer.items].forEach(async item => {
+          if (["application/x-zip-compressed",""].indexOf(item.type) == -1) return;
+          var file = item.getAsFile();
+          var item = item.webkitGetAsEntry();
+          if (item?.isDirectory) {
+            var app = item.name;
+            if (!app.toLowerCase().endsWith(".app")) app += ".app";
+            const controller = new AbortController();
+            controller.id = Math.random().toString(16).slice(2);
+            controller.signal.onabort = () => {
+              registration.active.postMessage({action:"ABORT",controller:controller.id}) 
+            };
+            addAppLoading(app,1,controller);
+            await fetch(app, {method: 'PUT',headers:{"X-Zipjs-Pass-Through": 1,"X-Abort-Controller": controller.id},signal:controller.signal});
+            var files = await (async function entryToFiles(entry) {
+              var filename = entry.fullPath.slice(1);
+              if (filename.indexOf("/.") != -1) return [];
+              if (entry.isFile) {
+                filename = filename.split('/');
+                filename[0] = app;
+                filename = filename.join('/');
+                var file = await readFile(entry);
+                return [{file,filename}];
+              } else {
+                var reader = entry.createReader();
+                var files = [];
+                entries = await readEntries(reader);
+                while (entries.length > 0) {
+                  files.push(...entries.map(entryToFiles));
+                  entries = await readEntries(reader);
+                }
+                return [].concat(...await Promise.all(files));
+              }
+            })(item)
+            var appsize = files.reduce((acc,cur) => acc + cur.file.size,0);
+            var progressBar = document.querySelector(`[app="${app}"] .progress`);
+            progressBar.setAttribute("aria-valuemax",appsize);
+            var promises = files.map(({file,filename}) => fetch(filename, {
+              method: 'PUT',
+              headers:{
+                "Last-Modified": new Date(file.lastModified).toUTCString(), 
+                "Content-Type": file.type, // TODO: Write this info to a place you're allowed to put it (and put it back later)
+                "Content-Length": file.size,
+                "X-Abort-Controller": controller.id
+              },
+              signal:controller.signal,
+              body: file
+            }));
+            await Promise.all(promises).catch(() => {
+              document.querySelector(`[app="${app}"] .progress-bar`)?.classList.add("bg-danger")
+            })
+            registration.active.postMessage({action:"FINISH",controller:controller.id});
+            addAppRegular(app);
+          } else {
+            openFile(file);
+          }
+        });
+      });
+      function readEntries(reader) {
+        return new Promise((resolve, reject) => {
+          reader.readEntries(resolve, reject);
+        });
+      }
+      function readFile(entry,filename) {
+        return new Promise((resolve, reject) => {
+          entry.file(resolve, reject);
+        });
+      }
     </script>
     <script src="libs/bootstrap.bundle.min.js" crossorigin="anonymous"/>
   </body>

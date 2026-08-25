@@ -55,7 +55,7 @@
                   headers:{
                     "Last-Modified": new Date(file.lastModified).toUTCString(), 
                     "Content-Type": file.type, 
-                    "Content-Length": file.size,
+                    "X-Content-Length": file.size,
                     "X-Abort-Controller": controller.id
                   },
                   signal:controller.signal,
@@ -92,7 +92,7 @@
                   headers:{
                     "Last-Modified": new Date(file.lastModified).toUTCString(), 
                     "Content-Type": file.type, 
-                    "Content-Length": file.size,
+                    "X-Content-Length": file.size,
                     "X-Abort-Controller": controller.id
                   },
                   signal:controller.signal,
@@ -201,7 +201,6 @@
         navigator.serviceWorker.addEventListener('message', (event) => {
           if ("progress" in event.data) {
             var app = (new URL(event.data.url)).pathname.slice(BASE.pathname.length).split("/")[0];
-            debugger;
             var progressBar = document.querySelector(`[app="${app}"] .progress`);
             progressBar.setAttribute("aria-valuenow",event.data.received - -progressBar.getAttribute("aria-valuenow"));
             progressBar.children[0].style.width = (progressBar.getAttribute("aria-valuenow") / progressBar.getAttribute("aria-valuemax") * 100).toFixed(2) + "%"
@@ -399,8 +398,8 @@
               method: 'PUT',
               headers:{
                 "Last-Modified": new Date(file.lastModified).toUTCString(), 
-                "Content-Type": file.type, // TODO: Write this info to a place you're allowed to put it (and put it back later)
-                "Content-Length": file.size,
+                "Content-Type": file.type,
+                "X-Content-Length": file.size, // TODO: Write this info to a place you're allowed to put it (and put it back later)
                 "X-Abort-Controller": controller.id
               },
               signal:controller.signal,

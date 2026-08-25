@@ -51,64 +51,6 @@ self.addEventListener('activate', function(event) {
   self.clients.claim()
 });
 
-
-// Intercept constructor to be less annoying
-(() => {
-  const OriginalRequest = globalThis.Request;
-
-  globalThis.Request = new Proxy(OriginalRequest, {
-    construct(target, args, newTarget) {
-      let [a, b] = args;
-
-      b ??= {};
-
-      if (b.mode === "navigate") {
-        b = new OriginalRequest(b, { mode: "same-origin" });
-      } else if (a?.mode === "navigate" && !b.mode) {
-        a = new OriginalRequest(a, { mode: "same-origin" });
-      }
-
-      let headers;
-
-      if (a instanceof URL && (a.username || a.password)) {
-        headers = new Headers(b.headers);
-        headers.set(
-          "Authorization",
-          `Basic ${btoa(a.username + ":" + a.password)}`
-        );
-
-        a.username = "";
-        a.password = "";
-      } else if (
-        a instanceof OriginalRequest ||
-        (typeof a === "string" && URL.canParse(a))
-      ) {
-        const url = (a.url || a).split("/");
-        var [auth, host] = url[2].split("@");
-        if (!host) [auth, host] = [host, auth];
-
-        url[2] = host;
-        a = url.join("/");
-
-        if (auth) {
-          headers = new Headers(b.headers);
-          headers.set("Authorization", `Basic ${btoa(auth)}`);
-        }
-      }
-
-      if (headers) {
-        if (b instanceof OriginalRequest) {
-          b = new OriginalRequest(b, { headers });
-        } else {
-          b = { ...b, headers };
-        }
-      }
-
-      return Reflect.construct(target, [a, b], newTarget);
-    }
-  });
-})();
-
 const uploadControllers = new Map();
 self.addEventListener('fetch', event => {
   var r = event.request;
@@ -126,15 +68,34 @@ self.addEventListener('fetch', event => {
     var url = wURL(r.url,referrer);
     if (url != r.url && (r.method == "GET" || r.method == "HEAD")) return Response.redirect(url,302);
 
+    var options;
+    // Avoid problem where newly created request objects cannot have mode navigate
     var navigate = r.mode == "navigate";
-    if (referrer != r.referrer) {
-      r = new Request(r, {referrer})
+    if (navigate) {
+      options ??= {}
+      options.mode = "same-origin";
     }
-    if (url != r.url) r = new Request(url, r)
-
+    // Put the right referrer if it is not there yet
+    if (referrer != r.referrer) {
+      options ??= {}
+      options.referrer = referrer
+    }
+    // Fix problem where newly created requests cannot have auth info
+    var auth = url.split("/")[2]?.split("@").slice(0,-1).join("@");
+    if (auth) {
+      options ??= {}
+      options.headers ??= new Headers(r.headers);
+      headers.set("Authorization", `Basic ${btoa(auth)}`)
+      url = url.split("/");
+      url[2] = url[2].split("@").slice(-1)[0];
+      url = url.join("/");
+    }
+    // Fix problem where the signal added to a request is not passed on to the serviceworker
     var signal// = r.signal  // Doesn't work yet, not implemented that way in broswers, workaround needed
     if (r.headers.has("X-Abort-Controller")) {
-      var id = event.clientId + "#" + r.headers.get("X-Abort-Controller");
+      options ??= {}
+      options.headers ??= new Headers(r.headers);
+      var id = event.clientId + "#" + options.headers.get("X-Abort-Controller");
       var controller;
       if (uploadControllers.has(id)) {
         controller = uploadControllers.get(id);
@@ -143,7 +104,15 @@ self.addEventListener('fetch', event => {
         uploadControllers.set(id,controller);
       }
       signal = controller.signal;
+      options.signal = signal;
+      options.headers.delete("X-Abort-Controller")
     }
+    const init = new Proxy(r, {
+      get(target, prop) {
+        return prop in options ? options[prop] : target[prop];
+      },
+    });
+    if (url != r.url || options) r = new Request(url, init);
     return request(r, null, navigate, client, signal);
   })());
 });
@@ -259,14 +228,14 @@ async function request(input, options, navigate=false, client, signal) {
   try {
     let url;
     if (input instanceof URL) {
-      url = new URL(url)
+      url = input
     } else if (input instanceof Request) {
       url = new URL(input.url)
     } else {
       url = new URL(input)
     }
     if (options) {
-      if (options.url == input) {
+      if (options.url == input && options instanceof Request) {
         input = options
       } else {
         input = new Request(input,options);
@@ -281,7 +250,7 @@ async function request(input, options, navigate=false, client, signal) {
     if (url.username || url.password) {
       [username , password] = [ url.username, url.password ]
       url.username = url.password = ""
-      input = new Request(input);
+      input = new Request(url,input);
     }
 
     app = url.pathname.slice(BASE.pathname.length).split(AppExtRegEx).slice(0,-1);
@@ -467,6 +436,10 @@ async function request(input, options, navigate=false, client, signal) {
             } else {
               stream = stream.pipeThrough(progressTracker(onprogress));
               res = new Response(stream,{headers:headers || input.headers})
+            }
+            if (res.headers.has("X-Content-Length")) {
+              res.headers.set("Content-Length",res.headers.get("X-Content-Length"))
+              res.headers.delete("X-Content-Length")
             }
           }
           await cache.put(new Request(url,{method:"GET"}), res)

@@ -274,6 +274,11 @@ async function request(input, options, navigate=false, client, signal) {
             cache = await caches.open(zippath);
             files = await cache.keys();
             zippath += "/";
+          } else if (await caches.has(zippath.slice(0,-4))) {
+            zippath = zippath.slice(0,-4);
+            cache = await caches.open(zippath);
+            files = await cache.keys();
+            zippath += "/";
           } else {
             zippath = zippath.slice(0,-4) + "/";
             files = (await cache.keys()).filter(r => r.url.startsWith(BASE + zippath));
@@ -290,9 +295,13 @@ async function request(input, options, navigate=false, client, signal) {
             return cache.match(f)
             .then(response => HeadersToOptions(response))
             .then(([body, options, headers]) => {
+              if (!options.uncompressedSize) {
+                options.uncompressedSize = Number(headers.get("Content-Length")) || 0;
+                options.compressionMethod = 0;
+              }
               var encoding = headers.get("Content-Encoding")?.split(" ") || [];
               contentLength += Number(headers.get("Content-Length")) || 0;
-              uncompressedSize += Number(headers.get("X-Zipjs-Uncompressed-Size")) || Number(headers.get("Content-Length")) || 0;
+              uncompressedSize += options.uncompressedSize;
               for (var i = 0; i < encoding.length; ++i) {
                 if (encoding[i] == "zipjs") break;
                 body = body.pipeThrough(new DecompressionStream(encoding[i]))

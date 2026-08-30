@@ -1111,12 +1111,15 @@ var har = {
 import { parseJsonStreamWithPaths, parseNestedJsonStreamWithPaths, streamToIterable } from "./libs/json-stream-es.mjs";
 
 var stream = (new Response(JSON.stringify(har))).body;
-stream = stream.pipeThrough(new TextDecoderStream()).pipeThrough(parseJsonStreamWithPaths(["log","entries"]));
-for await (const {value, path} of streamToIterable(stream)) {
+stream = stream.pipeThrough(new TextDecoderStream()).pipeThrough(parseNestedJsonStreamWithPaths(["log","entries",undefined]));
+for await (const subStream of streamToIterable(stream)) {
 	// Will be called twice:
 	// - { test: "value1" }
 	// - "value2"
-	console.log(value, path);
+    for await (const entry of streamToIterable(subStream)) {
+	    console.log(entry);
+
+    }
 }
 
 var stream = (new Response(JSON.stringify({

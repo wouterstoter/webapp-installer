@@ -1,5 +1,6 @@
 import "./libs/zip.js";
 import {rezipper, HeadersToOptions, progressTracker} from "./rezip.js";
+import { parseJsonStream, streamToIterable } from "./libs/json-stream-es.mjs";
 
 const CACHE_BASE = 'webapp-installer-';
 const CACHE = CACHE_BASE + '2026-08-17';
@@ -107,12 +108,19 @@ self.addEventListener('fetch', event => {
       options.signal = signal;
       options.headers.delete("X-Abort-Controller")
     }
-    const init = new Proxy(r, {
-      get(target, prop) {
-        return prop in options ? options[prop] : target[prop];
-      },
-    });
-    if (url != r.url || options) r = new Request(url, init);
+    try {
+      if (options) r = new Request(r,options);
+      if (url != r.url) r = new Request(url,r);
+    } catch(e) {
+      var body = r.body || await r.ArrayBuffer();
+      const init = new Proxy(r, {
+        get(target, prop) {
+          if (prop == "body") return body
+          return prop in options ? options[prop] : target[prop];
+        },
+      });
+      if (url != r.url || options) r = new Request(url, init);
+    }
     return request(r, null, navigate, client, signal);
   })());
 });
@@ -407,7 +415,7 @@ async function request(input, options, navigate=false, client, signal) {
         return new Response(null,{status: response.status, statusText: response.statusText, headers: response.headers});
       case "PUT":
         var stream = input.body || (await input.blob()).stream();
-        if (url.pathname.endsWith(".zip") || url.pathname.endsWith(".app")) {
+        if (url.pathname.toLowerCase().endsWith(".zip") || url.pathname.toLowerCase().endsWith(".app")) {
           var progress = 0;
           var onprogress = async p => (await client).postMessage({received: p.received, progress: progress += p.received, url: input.url});
           cache.put(new Request(url,{method:"GET"}),new Response(null,{status:200,headers:input.headers}));
@@ -428,6 +436,12 @@ async function request(input, options, navigate=false, client, signal) {
           }
           if (exists) return new Response(null,{status:200,statusText:"OK",headers:{Location:url.href}})
           return new Response(null,{status:201,statusText:"Created",headers:{Location:url.href}})
+        } else if (url.pathname.toLowerCase().endsWith(".har")) {
+          //stream = stream.pipeThrough(new TextDecoderStream());
+          //stream = stream.pipeThrough(new TextDecoderStream()).pipeThrough(parseJsonStream(["log","entries"]));
+          //for await (const entry of streamToIterable(stream)) {
+          //  console.log(entry);
+          //}
         } else {
           var exists = await cache.delete(new Request(url,{method:"GET"})); // Delete the file if it already exists
           // Handle redirects

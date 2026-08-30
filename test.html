@@ -1108,50 +1108,14 @@ var har = {
 
 </script>
 <script type="module">
-import { parseJsonStreamWithPaths, parseNestedJsonStreamWithPaths, streamToIterable } from "./libs/json-stream-es.mjs";
+import { parseJsonStream, streamToIterable } from "./libs/json-stream-es.mjs";
 
 var stream = (new Response(JSON.stringify(har))).body;
-stream = stream.pipeThrough(new TextDecoderStream()).pipeThrough(parseNestedJsonStreamWithPaths(["log","entries",undefined]));
-for await (const subStream of streamToIterable(stream)) {
-	// Will be called twice:
-	// - { test: "value1" }
-	// - "value2"
-    for await (const entry of streamToIterable(subStream)) {
-	    console.log(entry);
-
-    }
+stream = stream.pipeThrough(new TextDecoderStream()).pipeThrough(parseJsonStream(["log","entries"]));
+for await (const entry of streamToIterable(stream)) {
+	console.log(entry);
 }
 
-var stream = (new Response(JSON.stringify({
-	"apples": {
-		"results": [
-			"apple1",
-			"apple2"
-		]
-	},
-	"cherries": {
-		"results": [
-			"cherry1",
-			"cherry2"
-		]
-	}
-}
-))).body
-stream = stream.pipeThrough(new TextDecoderStream()).pipeThrough(parseNestedJsonStreamWithPaths([["apples", "cherries"], "results"]));
-
-for await (const subStream of streamToIterable(stream)) {
-	if (subStream.path[0] === "apples") {
-		for await (const apple of streamToIterable(subStream)) {
-			console.log(apple);
-		}
-	} else if (subStream.path[0] === "cherries") {
-		for await (const cherry of streamToIterable(subStream)) {
-			console.log(cherry);
-		}
-	} else {
-		subStream.cancel();
-	}
-}
 
 </script>
 

@@ -9,11 +9,10 @@ import { Base64EncodeStream, Base64DecodeStream } from "./base64-stream.js";
  * @param {Headers|zip.ZipWriterAddDataOptions|zip.EntryGetDataOptions} [options] - The options to zip/unzip with (can also be part of headers of Request/Response)
  * @returns {Response} The zipped/unzipped response with the right headers
  */
-export async function rezipper(input,options = {}) {
+export async function rezipper(input,options = {},unzip = true) {
     let headers;
     let onprogress = options.onprogress;
     delete options.onprogress;
-    let unzip = true;
     if (input instanceof Request) unzip = false;
     [input, options, headers] = await HeadersToOptions(input,options);
     let signal = options.signal;

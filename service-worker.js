@@ -444,6 +444,8 @@ async function request(input, options, navigate=false, client, signal) {
           stream = stream.pipeThrough(new TextDecoderStream()).pipeThrough(parseJsonStream(["log","entries"]));
           for await (const entry of streamToIterable(stream)) {
             if (entry.request.url.toLowerCase().startsWith("data:")) continue;
+            if (!entry.response.status) continue;
+            if (entry.request.method != "GET") continue;
             entry.request.headers = entry.request.headers.reduce((a,b) => {a[b.name.toLowerCase()] = b.value;return a},{})
             if (entry._priority) entry.request.priority = ({high:"high",highest:"high",low:"low"})[entry._priority.toLowerCase()] || "auto";
             if (entry.request.bodySize > 0) entry.request.headers["content-length"] = entry.request.bodySize;
@@ -456,20 +458,15 @@ async function request(input, options, navigate=false, client, signal) {
             entry.request = new Request(entry.request.url,entry.request);
             entry.response.headers = entry.response.headers.reduce((a,b) => {a[b.name.toLowerCase()] = b.value;return a},{})
             if (entry.response.content?.text) {
-              if (entry.response.content.encoding == "base64") {
-                try {
-                  var encoded = atob(entry.response.content.text)
-                } catch(e) {
-                  var encoded = entry.response.content.text
-                }
-                var n = encoded.length;
-                entry.response.content.text = new Uint8Array(n);
-                while(n--){
-                    entry.response.content.text[n] = encoded.charCodeAt(n);
-                }
-                delete entry.response.content.encoding;
+              entry.response.body = entry.response.content.text;
+              var decode = (entry.response.content.encoding || "").toLowerCase().split(" ").filter(a => a); // This is how the text is currently encoded
+              var encode = (entry.response.headers["content-encoding"] || "").toLowerCase().split(" ").filter(a => a); // This is how we want it to be encoded when saved
+              while (decode[0] && encode[0] && encode[0] == decode[0]) { // Everything that is the same doesn't have to be redone
+                decode.shift();
+                encode.shift();
               }
-              entry.response.body = new Blob([entry.response.content.text],{type: entry.response.content.mimeType})
+              if (decode.length > 0) entry.response.body = (await rezipper(new Response(entry.response.body),new Headers({"content-encoding":decode.join(" ")}),true)).body;
+              if (encode.length > 0) entry.response.body = (await rezipper(new Response(entry.response.body),new Headers({"content-encoding":encode.join(" ")}),false)).body;
               delete entry.response.content;
             }
             if (entry.response.status >= 300 && entry.response.status < 400 && entry.response.redirectURL) {

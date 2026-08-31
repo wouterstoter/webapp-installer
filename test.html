@@ -1108,11 +1108,12 @@ var har = {
 
 </script>
 <script type="module">
-import { Base64EncodeStream, Base64DecodeStream } from "./base64-stream.js";
+import { rezipper } from "./rezip.js";
 
 var stream = (new Response(JSON.stringify(har))).body;
-stream = stream.pipeThrough(new Base64EncodeStream()).pipeThrough(new TextEncoderStream());
-console.log(atob(await (new Response(stream)).text()));
+var res = await rezipper(new Request("",{method:"PUT",body:JSON.stringify(har),headers:{"content-encoding":"base64 zipjs"}}));
+var res2 = await rezipper(res);
+console.log(await res2.text());
 
 
 

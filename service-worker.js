@@ -211,7 +211,9 @@ function wURL(url,base) {
           [base.username , base.password] = [p.username , p.password];
           p.username = p.password = ""
       }
-      return p.hostname == "localhost" ? p.pathname.slice(1) : p
+      if (p.hostname == "localhost") return p.pathname.slice(1)
+      if (p.pathname.endsWith("/") && !path.endsWith("/")) return p.origin + p.pathname.slice(0,-1) //
+      return p
   }
   last.pathname = "/" + last.pathname.slice(1).split(AppExtRegEx).map(validPath).join("/");
   last = last.hostname == "localhost" ? last.href.slice(last.origin.length + 1) : last.href;

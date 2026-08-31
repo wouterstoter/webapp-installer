@@ -322,7 +322,18 @@ async function request(input, options, navigate=false, client, signal) {
                 options.compressionMethod = 0;
               }
               options.passThrough = true;
-              body.pipeTo(zipper.writable(f.url.slice((BASE + zippath).length),options));
+              var filename = f.url.slice((BASE + zippath).length).split("#")[0].split("?")[0];
+              while (zipper.zipWriter.filenames.has(filename)) {
+                // Add and increment enumerator for duplicate filenames
+                filename = filename.split("/");
+                let f = filename.pop();
+                f = f.match(/^(.+?)(?: \((\d+)\))?(\.[^.]+)$/).slice(1);
+                f[1] = Number(f[1] || 1) + 1;
+                f = `${f[0]} (${f[1]})${f[2]}`
+                filename.push(f);
+                filename = filename.join(filename);
+              }
+              body.pipeTo(zipper.writable(filename,options));
             });
           });
           await Promise.all(promises);

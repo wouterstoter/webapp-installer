@@ -349,8 +349,8 @@ async function request(input, options, navigate=false, client, signal) {
               } else {
                 yield encoder.encode("200: filename content-length last-modified file-type")
               }
+              let path = url.pathname.slice((BASE.pathname + app.join("/")).length);
               if (navigate) {
-                let path = url.pathname.slice((BASE.pathname + app.join("/")).length);
                 yield encoder.encode(`<script>start(${JSON.stringify(app.slice(-1) + path)});</script>`);
                 if (path.length > 1) yield encoder.encode(`<script>onHasParentDirectory();</script>`);
               }
@@ -362,6 +362,7 @@ async function request(input, options, navigate=false, client, signal) {
                 if (search != -1) {[uri, search] = [uri.slice(0,search),uri.slice(search)];} else {search = ""}
                 uri = uri.split("/");
                 if (uri.length > 1) {
+                  if (path.length <= 1 && uri[0].endsWith(":")) uri[0] = uri.slice(0,3).join("/");
                   hash = search = "";
                   uri[0] += "/";
                 }
@@ -470,6 +471,7 @@ async function request(input, options, navigate=false, client, signal) {
               delete entry.response.content;
             }
             if (entry.response.status >= 300 && entry.response.status < 400 && entry.response.redirectURL) {
+              entry.response.redirectURL = wURL(entry.response.redirectURL,entry.request.url);
               entry.response = Response.redirect(entry.response.redirectURL,entry.response.status);
             } else {
               entry.response = new Response(entry.response.body,entry.response);

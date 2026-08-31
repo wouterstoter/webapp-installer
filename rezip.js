@@ -1,4 +1,6 @@
+import "./libs/zip.js";
 import mime from './libs/mime.min.js';
+import { Base64EncodeStream, Base64DecodeStream } from "./base64-stream.js";
 
 /* This file aims to help unzip and zip individual files through streams of a request/response using zip.js */
 /**
@@ -38,6 +40,10 @@ export async function rezipper(input,options = {}) {
                     i--;
                 }
                 [input, options, headers] = [await EntryToStream(unzip,input,options), ...EntryToOptions(unzip,input,headers)];
+            } else if (encodings[i] == "base64") {
+                var stream = new (unzip ? Base64DecodeStream : Base64EncodeStream)(encodings[i]);
+                input = input.pipeThrough(stream);
+                if (!unzip) input = input.pipeThrough(new TextEncoderStream())
             } else {
                 // See if the browser can (de)compress the format natively
                 try {
@@ -71,6 +77,7 @@ export async function rezipper(input,options = {}) {
         delete options.passThrough;
     }
     for (const key in options) {
+        if (!options[key]) continue;
         let newKey = "x-zipjs-" + key.replace(/\W+/g, " ").split(/ |\B(?=[A-Z])/).map(word => word.toLowerCase()).join("-")
         headers.set(newKey, Number(options[key]) || options[key])
     }
@@ -95,6 +102,7 @@ export async function HeadersToOptions(input,options = {}) {
     if (input instanceof Request || input instanceof Response) {
         headers.push(input.headers);
         options["password"] = options["password"] || input.url?.split("/")[2]?.split("@").slice(0,-1)[0]?.split(":")[1];
+        if (!options["password"]) delete options["password"]
         input = input.body || (await input.blob()).stream();
     }
     let outputHeaders = new Headers();

@@ -25,8 +25,7 @@ function encodeBytesToBase64(bytes) {
 }
 
 function decodeBase64ToBytes(str) {
-  const binary = atob(str); // throws on malformed base64 - that's fine here,
-                             // since transform() only ever passes 4-char-aligned groups
+  const binary = atob(str);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) {
     bytes[i] = binary.charCodeAt(i);

@@ -200,8 +200,8 @@
         var BASE = new URL(".",document.location.href);
         navigator.serviceWorker.addEventListener('message', (event) => {
           if ("progress" in event.data) {
-            var app = (new URL(event.data.url)).pathname.slice(BASE.pathname.length).split("/")[0];
-            var progressBar = document.querySelector(`[app="${app}"] .progress`);
+            var app = decodeURI((new URL(event.data.url)).pathname.slice(BASE.pathname.length).split("/")[0]);
+            var progressBar = document.querySelector(`[app=${JSON.stringify(app)}] .progress`);
             progressBar.setAttribute("aria-valuenow",event.data.received - -progressBar.getAttribute("aria-valuenow"));
             progressBar.children[0].style.width = (progressBar.getAttribute("aria-valuenow") / progressBar.getAttribute("aria-valuemax") * 100).toFixed(2) + "%"
           }

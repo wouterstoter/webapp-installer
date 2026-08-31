@@ -438,6 +438,9 @@ async function request(input, options, navigate=false, client, signal) {
           if (exists) return new Response(null,{status:200,statusText:"OK",headers:{Location:url.href}})
           return new Response(null,{status:201,statusText:"Created",headers:{Location:url.href}})
         } else if (url.pathname.toLowerCase().endsWith(".har")) {
+          var progress = 0;
+          var onprogress = async p => (await client).postMessage({received: p.received, progress: progress += p.received, url: input.url});
+          stream = stream.pipeThrough(progressTracker(onprogress,signal))
           cache.put(new Request(url,{method:"GET"}),new Response(null,{status:200,headers:input.headers}));
           var new_app = url.pathname.slice(BASE.pathname.length);
           var exists = await caches.delete(new_app);

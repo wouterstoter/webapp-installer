@@ -1,6 +1,7 @@
 import "./libs/zip.js";
 import {rezipper, HeadersToOptions, progressTracker} from "./rezip.js";
 import { parseJsonStream, streamToIterable } from "./libs/json-stream-es.mjs";
+import mime from './libs/mime.min.js';
 
 const CACHE_BASE = 'webapp-installer-';
 const CACHE = CACHE_BASE + '2026-08-17';
@@ -299,6 +300,7 @@ async function request(input, options, navigate=false, client, signal) {
           headers.set("Content-Type","application/zip");
           var contentLength = 0;
           var uncompressedSize = 0;
+          var filenames = new Set();
           var promises = files.map(f => {
             // Skip files and folders whose name starts with .
             if (("/" + f.url.slice((BASE + zippath).length)).split("#")[0].split("?")[0].indexOf("/.") != -1) return
@@ -320,10 +322,15 @@ async function request(input, options, navigate=false, client, signal) {
               }
               if (encoding.indexOf("zipjs") == -1) {
                 options.compressionMethod = 0;
+              } else {
+                options.passThrough = true;
               }
-              options.passThrough = true;
               var filename = f.url.slice((BASE + zippath).length).split("#")[0].split("?")[0];
-              while (zipper.zipWriter.filenames.has(filename)) {
+              if (filename.endsWith("/")) {
+                filename += "index"
+                if (headers.has("Content-Type")) filename += "." + mime.getExtension(headers.get("Content-Type"))
+              }
+              while (filenames.has(filename)) {
                 // Add and increment enumerator for duplicate filenames
                 filename = filename.split("/");
                 let f = filename.pop();
@@ -331,8 +338,9 @@ async function request(input, options, navigate=false, client, signal) {
                 f[1] = Number(f[1] || 1) + 1;
                 f = `${f[0]} (${f[1]})${f[2]}`
                 filename.push(f);
-                filename = filename.join(filename);
+                filename = filename.join("/");
               }
+              filenames.add(filename);
               body.pipeTo(zipper.writable(filename,options));
             });
           });
@@ -494,6 +502,8 @@ async function request(input, options, navigate=false, client, signal) {
             }
             await new_cache.put(entry.request,entry.response);
           }
+          if (exists) return new Response(null,{status:200,statusText:"OK",headers:{Location:url.href}})
+          return new Response(null,{status:201,statusText:"Created",headers:{Location:url.href}})
         } else {
           var exists = await cache.delete(new Request(url,{method:"GET"})); // Delete the file if it already exists
           // Handle redirects

@@ -437,11 +437,48 @@ async function request(input, options, navigate=false, client, signal) {
           if (exists) return new Response(null,{status:200,statusText:"OK",headers:{Location:url.href}})
           return new Response(null,{status:201,statusText:"Created",headers:{Location:url.href}})
         } else if (url.pathname.toLowerCase().endsWith(".har")) {
-          //stream = stream.pipeThrough(new TextDecoderStream());
-          //stream = stream.pipeThrough(new TextDecoderStream()).pipeThrough(parseJsonStream(["log","entries"]));
-          //for await (const entry of streamToIterable(stream)) {
-          //  console.log(entry);
-          //}
+          cache.put(new Request(url,{method:"GET"}),new Response(null,{status:200,headers:input.headers}));
+          var new_app = url.pathname.slice(BASE.pathname.length);
+          var exists = await caches.delete(new_app);
+          var new_cache = await caches.open(new_app);
+          stream = stream.pipeThrough(new TextDecoderStream()).pipeThrough(parseJsonStream(["log","entries"]));
+          for await (const entry of streamToIterable(stream)) {
+            if (entry.request.url.toLowerCase().startsWith("data:")) continue;
+            entry.request.headers = entry.request.headers.reduce((a,b) => {a[b.name.toLowerCase()] = b.value;return a},{})
+            if (entry._priority) entry.request.priority = ({high:"high",highest:"high",low:"low"})[entry._priority.toLowerCase()] || "auto";
+            if (entry.request.bodySize > 0) entry.request.headers["content-length"] = entry.request.bodySize;
+            delete entry.request.bodySize;
+            if (entry.request.postData?.text) {
+              entry.request.body = new Blob([entry.request.postData.text],{type: entry.request.postData.mimeType})
+              delete entry.request.postData
+            }
+            entry.request.url = wURL(entry.request.url,url.origin + url.pathname + "/");
+            entry.request = new Request(entry.request.url,entry.request);
+            entry.response.headers = entry.response.headers.reduce((a,b) => {a[b.name.toLowerCase()] = b.value;return a},{})
+            if (entry.response.content?.text) {
+              if (entry.response.content.encoding == "base64") {
+                try {
+                  var encoded = atob(entry.response.content.text)
+                } catch(e) {
+                  var encoded = entry.response.content.text
+                }
+                var n = encoded.length;
+                entry.response.content.text = new Uint8Array(n);
+                while(n--){
+                    entry.response.content.text[n] = encoded.charCodeAt(n);
+                }
+                delete entry.response.content.encoding;
+              }
+              entry.response.body = new Blob([entry.response.content.text],{type: entry.response.content.mimeType})
+              delete entry.response.content;
+            }
+            if (entry.response.status >= 300 && entry.response.status < 400 && entry.response.redirectURL) {
+              entry.response = Response.redirect(entry.response.redirectURL,entry.response.status);
+            } else {
+              entry.response = new Response(entry.response.body,entry.response);
+            }
+            await new_cache.put(entry.request,entry.response);
+          }
         } else {
           var exists = await cache.delete(new Request(url,{method:"GET"})); // Delete the file if it already exists
           // Handle redirects

@@ -1108,13 +1108,12 @@ var har = {
 
 </script>
 <script type="module">
-import { parseJsonStream, streamToIterable } from "./libs/json-stream-es.mjs";
+import { Base64EncodeStream, Base64DecodeStream } from "./base64-stream.js";
 
 var stream = (new Response(JSON.stringify(har))).body;
-stream = stream.pipeThrough(new TextDecoderStream()).pipeThrough(parseJsonStream(["log","entries"]));
-for await (const entry of streamToIterable(stream)) {
-	console.log(entry);
-}
+stream = stream.pipeThrough(new Base64EncodeStream()).pipeThrough(new TextEncoderStream());
+console.log(atob(await (new Response(stream)).text()));
+
 
 
 </script>

@@ -5,7 +5,7 @@ import mime from './libs/mime.min.js';
 import { ReplaceStream } from "./replace-stream.js";
 
 const CACHE_BASE = 'webapp-installer-';
-const CACHE = CACHE_BASE + '2026-08-17';
+const CACHE = CACHE_BASE + '2026-09-01';
 const BASE = new URL(".",self.location.href);
 const APP_EXTS = ["zip","har","app"]
 
@@ -26,13 +26,16 @@ const CACHE_URLS = [
   'libs/bootstrap.min.css',
   'libs/bootstrap-icons.min.css',
   'libs/zip.js',
-  'rezip.js',
   'libs/mime.min.js',
+  'libs/json-stream-es.mjs',
   'libs/fonts/bootstrap-icons.woff',
   'libs/fonts/bootstrap-icons.woff2',
   '404.html',
   '500.html',
-  'folder.html'
+  'folder.html',
+  'rezip.js',
+  'base64-stream.js',
+  'replace-stream.js'
 ];
 
 self.addEventListener('install', event => {
@@ -440,7 +443,7 @@ async function request(input, options, navigate=false, client, signal) {
           console.error(e)
           return errorpage(500,navigate ? app : null);
         });
-        if (response && navigate && response.headers.get("content-type")?.split(";")[0].toLowerCase() == "text/html") {
+        if (response && navigate && response.body && response.headers.get("content-type")?.split(";")[0].toLowerCase() == "text/html") {
           // Make urls relative for navigations
           var matchfunc = (url => (match) => wURL(match,url))(url.toString());
           //replace absolute urls starting with http(s):// or //
@@ -450,6 +453,10 @@ async function request(input, options, navigate=false, client, signal) {
           var rel_urls = /(?<=\s(href|src)=("|'))\/(?:[-a-zA-Z0-9@:%_\+.~#?&\/\/=]*)?(?="|')/gi
           body = body.pipeThrough(new ReplaceStream(rel_urls,matchfunc))
           response = new Response(body,response);
+        }
+        if (response && navigate && response.body) {
+          response?.headers.set("Content-Security-Policy", "child-src 'self'; connect-src 'self' http: https: blob:") // Prevent loading of external resources
+          response?.headers.set("Referrer-Policy", "origin-when-cross-origin") // Prevent sharing the referrer externally
         }
         return response || errorpage(404,navigate ? app : null);
         break;

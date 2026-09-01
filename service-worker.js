@@ -142,6 +142,7 @@ self.addEventListener('message', (event) => {
   }
 });
 
+// TODO: Allow for domain escaping while still preventing app escaping
 let AppExtRegEx = new RegExp("(?<=\\.(?:" + APP_EXTS.map(RegExp.escape).join("|") + "))\/","gi")
 function wURL(url,base) {
   base = base || BASE;
@@ -425,6 +426,17 @@ async function request(input, options, navigate=false, client, signal) {
           console.error(e)
           return errorpage(500,navigate ? app : null);
         });
+        if (response && navigate && response.headers.get("content-type")?.split(";")[0].toLowerCase() == "text/html") {
+          // Make urls relative for navigations
+          var matchfunc = (url => (match) => wURL(match,url))(url.toString());
+          //replace absolute urls starting with http(s):// or //
+          var abs_urls = /(?<="|')(?:http[s]?:)?\/\/(?:www\.)?[-a-zA-Z0-9@%._\+~#=]{2,256}\.[a-z]{2,6}\b(?:[-a-zA-Z0-9@:%_\+.~#?&\/\/=]*)(?="|')/gi
+          var body = response.body.pipeThrough(new ReplaceStream(abs_urls,matchfunc))
+          //replace relative urls in href or src positions
+          var rel_urls = /(?<=\s(href|src)=("|'))\/(?:[-a-zA-Z0-9@:%_\+.~#?&\/\/=]*)?(?="|')/gi
+          body = body.pipeThrough(new ReplaceStream(rel_urls,matchfunc))
+          response = new Response(body,response);
+        }
         return response || errorpage(404,navigate ? app : null);
         break;
       case "HEAD":
@@ -468,7 +480,7 @@ async function request(input, options, navigate=false, client, signal) {
             if (entry.request.url.toLowerCase().startsWith("data:")) continue;
             if (!entry.response.status) continue;
             if (entry.request.method != "GET") continue;
-            entry.request.headers = entry.request.headers.reduce((a,b) => {a[b.name.toLowerCase()] = b.value;return a},{})
+            entry.request.headers = entry.request.headers.reduce((a,b) => {if (b.name.startsWith(":")) return a; a[b.name.toLowerCase()] = b.value;return a},{})
             if (entry._priority) entry.request.priority = ({high:"high",highest:"high",low:"low"})[entry._priority.toLowerCase()] || "auto";
             if (entry.request.bodySize > 0) entry.request.headers["content-length"] = entry.request.bodySize;
             delete entry.request.bodySize;
@@ -478,7 +490,7 @@ async function request(input, options, navigate=false, client, signal) {
             }
             entry.request.url = wURL(entry.request.url,url.origin + url.pathname + "/");
             entry.request = new Request(entry.request.url,entry.request);
-            entry.response.headers = entry.response.headers.reduce((a,b) => {a[b.name.toLowerCase()] = b.value;return a},{})
+            entry.response.headers = entry.response.headers.reduce((a,b) => {if (b.name.startsWith(":")) return a; a[b.name.toLowerCase()] = b.value;return a},{})
             if (entry.response.content?.text) {
               entry.response.body = entry.response.content.text;
               var decode = (entry.response.content.encoding || "").toLowerCase().split(" ").filter(a => a); // This is how the text is currently encoded

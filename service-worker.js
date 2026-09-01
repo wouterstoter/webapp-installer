@@ -145,7 +145,6 @@ self.addEventListener('message', (event) => {
   }
 });
 
-// TODO: Allow for domain escaping while still preventing app escaping
 let AppExtRegEx = new RegExp("(?<=\\.(?:" + APP_EXTS.map(RegExp.escape).join("|") + "))\/","gi")
 function wURL(url,base) {
   base = base || BASE;
@@ -438,7 +437,7 @@ async function request(input, options, navigate=false, client, signal) {
           responses = await cache.matchAll(new Request(index_url,input),{ignoreSearch: true, ignoreMethod: true, ignoreVary: true});
         }
         var response = responses[0];
-        if (response && response.headers.has("Content-Encoding")) response = await rezipper(response,{password,signal}).catch(e => {
+        if (response && response.headers.has("Content-Encoding") && app.length > 0) response = await rezipper(response,{password,signal}).catch(e => {
           if (e.message == zip.ERR_ENCRYPTED || e.message == zip.ERR_INVALID_PASSWORD) return errorpage(401,navigate ? app : null);
           console.error(e)
           return errorpage(500,navigate ? app : null);
@@ -546,11 +545,12 @@ async function request(input, options, navigate=false, client, signal) {
           // Handle regular puts
           if (!res) {
             var onprogress = async p => (await client).postMessage({...p, url: input.url});
-            if (input.headers.has("Content-Encoding")) {
+            if (input.headers.has("Content-Encoding") && app.length > 0) {
+              input.body = stream;
               res = await rezipper(input,{onprogress,signal});
             } else {
               stream = stream.pipeThrough(progressTracker(onprogress));
-              res = new Response(stream,{headers:headers || input.headers})
+              res = new Response(stream,{headers:input.headers})
             }
             if (res.headers.has("X-Content-Length")) {
               res.headers.set("Content-Length",res.headers.get("X-Content-Length"))

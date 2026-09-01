@@ -475,22 +475,19 @@ async function request(input, options, navigate=false, client, signal) {
           var new_cache = await caches.open(new_app);
           if (!Number(input.headers.get("X-Zipjs-Pass-Through") || "0")) {
             const zipReader = new zip.ZipReaderStream({passThrough: true});
-            var promises = [];
-            var keys = [];
-            for await (const entry of (stream.pipeThrough(zipReader))) {
-              if (entry.directory) continue;
-              if (entry.filename.startsWith(".") || entry.filename.indexOf("/.") != -1) continue
-              promises.push((entry => rezipper(entry,{onprogress,signal})
-                .then(response => new_cache.put(BASE + new_app + "/" + entry.filename, response))
-              )(entry))
-              keys.push(entry.filename);
-            }
-            await Promise.allSettled(promises)
-            .then(values => { // Make sure not everything halts if one file fails, and the problem is logged
-              for (const i = 0; i < values.length; ++i) {
-                if (values[i].status == "rejected") console.warn(keys[i],values[i].reason)
+            await new Promise(async (resolve,reject) => {
+              var left = 0;
+              for await (const entry of (stream.pipeThrough(zipReader))) {
+                if (entry.directory) continue;
+                if (entry.filename.startsWith(".") || entry.filename.indexOf("/.") != -1) continue
+                left++;
+                (entry => rezipper(entry,{onprogress,signal})
+                  .then(response => new_cache.put(BASE + new_app + "/" + entry.filename, response))
+                  .catch(e => console.warn(entry.filename,e))
+                  .finally(() => {left--; if (!left) resolve()})
+                )(entry)
               }
-            });
+            })
           }
           if (exists) return new Response(null,{status:200,statusText:"OK",headers:{Location:url.href}})
           return new Response(null,{status:201,statusText:"Created",headers:{Location:url.href}})

@@ -2,6 +2,7 @@ import "./libs/zip.js";
 import {rezipper, HeadersToOptions, progressTracker} from "./rezip.js";
 import { parseJsonStream, streamToIterable } from "./libs/json-stream-es.mjs";
 import mime from './libs/mime.min.js';
+import { ReplaceStream } from "./replace-stream.js";
 
 const CACHE_BASE = 'webapp-installer-';
 const CACHE = CACHE_BASE + '2026-08-17';
@@ -267,13 +268,7 @@ async function request(input, options, navigate=false, client, signal) {
     app = url.pathname.slice(BASE.pathname.length).split(AppExtRegEx).slice(0,-1);
     var cache = await caches.has(app.join("/") || CACHE);
     if (cache) cache = await caches.open(app.join("/") || CACHE);
-    if (!cache && !navigate) return errorpage(404);
-    while (!cache) {
-      // If the whole app cannot be found, give the 404 page of the parent app that can be found
-      app = app.slice(0,-1);
-      cache = await caches.has(app.join("/") || CACHE);
-      if (cache) return errorpage(404,app);
-    }
+    if (!cache) return errorpage(404,navigate ? app : null);
 
     switch (input.method) {
       case "GET":
@@ -596,22 +591,17 @@ async function errorpage(status,app) {
       // We're not gonna give an error for the error page
     }
   }
-  if (response) {
-    body = new Uint8Array(await response.arrayBuffer());
-    try {
-      var decoder = new TextDecoder('utf-8', { fatal: true }); // Throws an error if not UTF-8 encoded, so the regular response can be used
-      var text = decoder.decode(body);
-      text = text.replace(/<head[^>]*>/i,`$&<base href="${encodeURI(url)}"/>`);
-      if (status == 401) text = text.replace(/<\/body>/i,authscript + '$&');
-      body = text;
-    } catch(e) {console.warn(e)}
+  if (response?.body) {
+    body = response.body
+    body = body.pipeThrough(new ReplaceStream(/<head( [^>]*)?>/i, `$&<base href="${encodeURI(url)}"/>`));
+    if (status == 401) body = body.pipeThrough(/<\/body>/i,authscript + '$&');
   }
   if (status == 401 && !body) body = `<!DOCTYPE html><html><head>${authscript}</head><body></body></html>`;
   var headers = new Headers(response?.headers);
   headers.set("Content-Type","text/html");
   headers.set("Content-Security-Policy", "child-src 'self'; connect-src 'self' http: https: blob:") // Prevent loading of external resources
   headers.set("Referrer-Policy", "origin-when-cross-origin") // Prevent sharing the referrer externally
-  return new Response(body,{status: status, statusText: statusText, headers: headers})
+  return new Response(body,{status, statusText, headers})
 }
 
 /**

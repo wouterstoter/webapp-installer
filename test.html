@@ -1108,14 +1108,10 @@ var har = {
 
 </script>
 <script type="module">
-import { rezipper } from "./rezip.js";
+import { ReplaceStream } from "./replace-stream.js";
 
 var stream = (new Response(JSON.stringify(har))).body;
-var res = await rezipper(new Request("",{method:"PUT",body:JSON.stringify(har),headers:{"content-encoding":"base64 zipjs"}}));
-var res2 = await rezipper(res);
-console.log(await res2.text());
-
-
-
+var res = stream.pipeThrough(new ReplaceStream(/Firefox/g,"Wouter",{replaceAll:false}))
+console.log(await (new Response(res)).text());
 </script>
 

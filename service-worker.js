@@ -285,6 +285,8 @@ async function request(input, options, navigate=false, client, signal) {
             cache = await caches.open(zippath);
             files = await cache.keys();
             zippath += "/";
+          } else if (responses.length > 0) {
+            break; // Continue as if it's a normal file
           } else if (await caches.has(zippath.slice(0,-4))) {
             zippath = zippath.slice(0,-4);
             cache = await caches.open(zippath);

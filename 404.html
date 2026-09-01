@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>WebApp Installer</title>
+    <link href="libs/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous"/>
+    <link rel="stylesheet" href="libs/bootstrap-icons.min.css"/>
+    <style>
+      #updateAlert {
+        display:none
+      }
+      #updateAlert.active {
+        display:flex
+      }
+    </style>
+  </head>
+  <body>
+    <div class="col-lg-8 mx-auto p-4 py-md-5">
+      <header class="d-flex align-items-center pb-3 mb-5 border-bottom">
+        <span class="d-flex align-items-center text-body-emphasis text-decoration-none">
+          <img src="favicon.svg" class="bi me-2" height="32" role="img"/>
+          <span class="fs-4">WebApp Installer</span>
+        </span>
+      </header>
+      <main>
+        <div id="updateAlert" class="alert alert-primary align-items-center" role="alert">
+          <i class="bi bi-arrow-clockwise flex-shrink-0 me-2"> </i>
+          <div class="flex-grow-1">A new update for WebApp Installer is available</div>
+          <button class="btn btn-primary" type="button">Update</button>
+        </div>
+        <h1 class="text-body-emphasis">404 Not Found</h1>
+        <p class="fs-5 col-md-8">Could not find this app or page. You can add apps <a href=".">here</a>.</p>
+        <div class="mb-5">
+          <a href="." class="btn btn-primary btn-lg px-4">Go home</a>
+        </div>
+        <footer class="pt-5 my-5 text-body-secondary border-top">Created by Wouter Stoter · © 2026 </footer>
+      </main>
+    </div>
+    <script>
+      function updateAlert(worker) {
+        const banner = document.getElementById('updateAlert');
+        banner.classList.add("active");
+
+        banner.querySelector("button").onclick = () => {
+          worker.postMessage('SKIP_WAITING');
+          banner.classList.remove("active");
+        };
+      }
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('service-worker.js',{scope: '.'})
+        .then((registration) => {
+          console.log('ServiceWorker registration successful with scope: ', registration.scope);
+          // An update is already waiting when the page loads
+          if (registration.waiting) {
+            updateAlert(registration.waiting);
+          }
+          // an update becomes available while the page is open
+          registration.addEventListener('updatefound', () => {
+            let newWorker = registration.installing;
+            newWorker.addEventListener('statechange', () => {
+              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                updateAlert(newWorker);
+              }
+            });
+          });
+          // When the new SW takes over, reload to get fresh content
+          navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
+          // Log errors
+          navigator.serviceWorker.ready.then((registration) => {
+            registration.active.onerror = (event) => console.error("[SW]", event)
+          });
+        }, function(err) {
+          console.error('ServiceWorker registration failed: ', err);
+        });
+      }
+    </script>
+    <script src="libs/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"/>
+  </body>
+</html>

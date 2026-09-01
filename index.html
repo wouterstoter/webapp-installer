@@ -1,128 +1,431 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
   <head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
     <title>WebApp Installer</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
-    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
-    <link rel="apple-touch-icon" sizes="180x180" href="favicon-180x180.png">
-    <link rel="icon" type="image/png" sizes="192x192" href="favicon-192x192.png">
-    <link rel="icon" type="image/png" sizes="512x512" href="favicon-512x512.png">
+    <link href="libs/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous"/>
+    <link rel="stylesheet" href="libs/bootstrap-icons.min.css"/>
+    <style>
+      #updateAlert {
+        display:none
+      }
+      #updateAlert.active {
+        display:flex
+      }
+    </style>
   </head>
   <body>
-    <input type="file" accept=".zip, .har, .app" style="display:none;"></input><br/>
-    <input type="file" webkitdirectory directory multiple style="display:none;"/><br/>
-    
-    <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', function() {
-          navigator.serviceWorker.register('service-worker.js',{scope: '.',type: 'module'}).then(function(registration) {
-            // Registration was successful
-            console.log('ServiceWorker registration successful with scope: ', registration.scope);
-            document.querySelector("input").style.display = "";
-            document.querySelector("input[directory]").style.display = "";
-          }, function(err) {
-            console.error('ServiceWorker registration failed: ', err);
-          });
-          navigator.serviceWorker.ready.then((registration) => {
-            registration.active.onerror = (event) => {
-              console.error("[SW]", event);
-            };
-          });
-        });
-      }
-      
-      // Send the zip to the service worker whenever it is uploaded
-      document.querySelector("input").onchange = function() {
-        var input = this.files[0];
-        
-        input.arrayBuffer()
-        .then(file => new Uint8Array(file))
-        .then(file => {
-          navigator.serviceWorker.ready.then(registration => {
-            fetch(input.name, {
-              method: 'PUT',
-              headers:{
-                "Last-Modified": new Date(input.lastModified).toUTCString(), 
-                "Content-type": input.type, 
-                "Content-length": input.size
-              },
-              body: file
-            }).then(() => window.location.reload())
-          });
-        });
-      }
-      document.querySelector("input[directory]").onchange = function() {
-        navigator.serviceWorker.ready.then(registration => {
-          var files = this.files;
-          var filename = files[0].webkitRelativePath.split("/")[0];
-          if (!filename.toLowerCase().endsWith(".app")) filename += ".app";
-          fetch(filename, {method: 'PUT'})
-          .then(() => {
-            var promises = [...files].map(f => {
-              return f.arrayBuffer()
-              .then(file => new Uint8Array(file))
-              .then(file => {
-                var filename = f.webkitRelativePath.split("/");
-                if (!filename[0].toLowerCase().endsWith(".app")) filename[0] += ".app";
-                filename = filename.join("/")
+    <div class="col-lg-8 mx-auto p-4 py-md-5">
+      <header class="d-flex align-items-center pb-3 mb-5 border-bottom">
+        <span class="d-flex align-items-center text-body-emphasis text-decoration-none">
+          <img src="favicon.svg" class="bi me-2" height="32" role="img"/>
+          <span class="fs-4">WebApp Installer</span>
+        </span>
+      </header>
+      <main>
+        <div id="updateAlert" class="alert alert-primary align-items-center" role="alert">
+          <i class="bi bi-arrow-clockwise flex-shrink-0 me-2"> </i>
+          <div class="flex-grow-1">A new update for WebApp Installer is available</div>
+          <button class="btn btn-primary" type="button">Update</button>
+        </div>
+        <h1 class="text-body-emphasis">Add your own WebApps</h1>
+        <p class="fs-5 col-md-8">Open a .har, .zip, or .app file to add them as a WebApp. You can also open an uncompressed folder as an app.</p>
+        <div class="mb-5">
+          <input id="openFile" type="file" accept=".zip, .har, .app" style="display:none;"/>
+          <label for="openFile" class="btn btn-primary btn-lg px-4">Open file</label>
+          <input id="openFolder" type="file" webkitdirectory directory multiple style="display:none;"/>
+          <label for="openFolder" class="btn btn-outline-primary btn-lg px-4">Open folder</label>
+          <script>
+            document.getElementById("openFile").onchange = function() {
+              var file = this.files[0];
+              if (!file) return;
+              openFile(file);
+            }
+            function openFile(file) {
+              navigator.serviceWorker?.ready.then(async (registration) => {
+                const controller = new AbortController();
+                controller.id = Math.random().toString(16).slice(2);
+                controller.signal.onabort = () => {
+                  registration.active.postMessage({action:"ABORT",controller:controller.id}) 
+                };
+                addAppLoading(file.name,file.size,controller);
+                fetch(file.name, {
+                  method: 'PUT',
+                  headers:{
+                    "Last-Modified": new Date(file.lastModified).toUTCString(), 
+                    "Content-Type": file.type, 
+                    "X-Content-Length": file.size,
+                    "X-Abort-Controller": controller.id
+                  },
+                  signal:controller.signal,
+                  body: file
+                })
+                .then(() => {
+                  registration.active.postMessage({action:"FINISH",controller:controller.id});
+                  addAppRegular(file.name);
+                })
+                .catch(() => {
+                  document.querySelector(`[app="${file.name}"] .progress-bar`)?.classList.add("bg-danger")
+                })
+              });
+            }
+            document.getElementById("openFolder").onchange = async function() {
+              var files = [...this.files].filter(file => file.name.indexOf("/.") == -1);
+              var app = files[0].webkitRelativePath.split("/")[0];
+              if (!app.toLowerCase().endsWith(".app")) app += ".app";
+              var appsize = files.reduce((acc,cur) => acc + cur.size,0);
+              var registration = await navigator.serviceWorker?.ready;
+              const controller = new AbortController();
+              controller.id = Math.random().toString(16).slice(2);
+              controller.signal.onabort = () => {
+                registration.active.postMessage({action:"ABORT",controller:controller.id}) 
+              };
+              addAppLoading(app,appsize,controller);
+              await fetch(app, {method: 'PUT',headers:{"X-Zipjs-Pass-Through": 1,"X-Abort-Controller": controller.id},signal:controller.signal});
+              var promises = files.map(file => {
+                var filename = file.webkitRelativePath.split('/');
+                filename[0] = app;
+                filename = filename.join('/');
                 return fetch(filename, {
                   method: 'PUT',
                   headers:{
-                    "Last-Modified": new Date(f.lastModified).toUTCString(), 
-                    "Content-type": f.type, 
-                    "Content-length": f.size
+                    "Last-Modified": new Date(file.lastModified).toUTCString(), 
+                    "Content-Type": file.type, 
+                    "X-Content-Length": file.size,
+                    "X-Abort-Controller": controller.id
                   },
+                  signal:controller.signal,
                   body: file
                 })
-              });
-              promises.push(promise);
-            })
-            Promise.all(promises)
-            .then(() => window.location.reload());
+              })
+              await Promise.all(promises).catch(() => {
+                document.querySelector(`[app="${app}"] .progress-bar`)?.classList.add("bg-danger")
+              })
+              registration.active.postMessage({action:"FINISH",controller:controller.id});
+              addAppRegular(app);
+            }
+          </script>
+        </div>
+        <hr class="col-3 col-md-2 mb-5"/>
+        <h1>Apps</h1>
+        <div id="apps" class="row row-cols-1 row-cols-md-2 g-4">
+          <template id="app_regular">
+            <div class="col">
+              <div class="card h-100">
+                <div class="card-body overflow-hidden">
+                  <div class="flex-row d-flex">
+                    <img id="icon" class="card me-3 flex-grow-0 flex-shrink-0" style="height: 64px;width:64px;padding:8px;"/>
+                    <div class="flex-shrink-1 flex-grow-1">
+                      <small id="app" class="text-body-secondary"></small>
+                      <h5 id="title" class="card-title"></h5>
+                    </div>
+                  </div>
+                  <p id="description" class="card-text text-truncate"></p>
+                </div>
+                <div class="card-footer d-flex">
+                  <a href="#" id="more" class="card-link my-auto me-auto">More</a>
+                  <a href="#" id="delete" class="btn btn-outline-danger ms-1" aria-label="Delete"><i class="bi bi-trash"></i></a>
+                  <a href="#" id="download" class="btn btn-outline-secondary ms-1" aria-label="Download"><i class="bi bi-download"></i></a>
+                  <a href="#" id="install" class="btn btn-secondary ms-1 d-none">Install</a>
+                  <a href="#" id="open" class="btn btn-primary ms-1">Open</a>
+                </div>
+              </div>
+            </div>
+          </template>
+          <template id="app_loading">
+            <div class="col fade show">
+              <div class="card h-100">
+                <div class="card-body overflow-hidden">
+                  <div class="flex-row d-flex">
+                    <div class="card me-3 flex-grow-0 flex-shrink-0" style="height: 64px;width:64px;">
+                      <div class="spinner-border text-primary m-auto" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                      </div>
+                    </div>
+                    <div class="flex-shrink-1 flex-grow-1">
+                      <h5 id="title" class="card-title"></h5>
+                    </div>
+                  </div>
+                </div>
+                <div class="card-footer d-flex">
+                  <div class="progress w-100 m-auto" role="progressbar" aria-label="Animated striped example" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 0%"></div>
+                  </div>
+                  <button id="cancel" type="button" class="btn px-0 ms-2" aria-label="Cancel"><i class="bi bi-x-lg"></i></button>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+        <footer class="pt-5 my-5 text-body-secondary border-top">Created by Wouter Stoter · © 2026 </footer>
+      </main>
+    </div>
+    <script>
+      function updateAlert(worker) {
+        const banner = document.getElementById('updateAlert');
+        banner.classList.add("active");
+
+        banner.querySelector("button").onclick = () => {
+          worker.postMessage('SKIP_WAITING');
+          banner.classList.remove("active");
+        };
+      }
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('service-worker.js',{scope: '.',type:"module"})
+        .then((registration) => {
+          console.log('ServiceWorker registration successful with scope: ', registration.scope);
+          // An update is already waiting when the page loads
+          if (registration.waiting) {
+            updateAlert(registration.waiting);
+          }
+          // an update becomes available while the page is open
+          registration.addEventListener('updatefound', () => {
+            let newWorker = registration.installing;
+            newWorker.addEventListener('statechange', () => {
+              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                updateAlert(newWorker);
+              }
+            });
           });
-        })
-      }
-      
-      window.onbeforeunload = function() {
-        navigator.serviceWorker.controller.postMessage("close");
-      }
-      
-      window.onmessage = (event) => {
-        try { 
-          var data = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
-          if (!data.log) return
-          navigator.serviceWorker.ready.then(registration => {
-            navigator.serviceWorker.controller.postMessage(data);
+          // When the new SW takes over, reload to get fresh content
+          navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload());
+          // Log errors
+          navigator.serviceWorker.ready.then((registration) => {
+            registration.active.onerror = (event) => console.error("[SW]", event)
           });
-        } catch(e) {}
+        }, function(err) {
+          console.error('ServiceWorker registration failed: ', err);
+        });
+        var BASE = new URL(".",document.location.href);
+        navigator.serviceWorker.addEventListener('message', (event) => {
+          if ("progress" in event.data) {
+            var app = decodeURI((new URL(event.data.url)).pathname.slice(BASE.pathname.length).split("/")[0]);
+            var progressBar = document.querySelector(`[app=${JSON.stringify(app)}] .progress`);
+            progressBar.setAttribute("aria-valuenow",event.data.received - -progressBar.getAttribute("aria-valuenow"));
+            progressBar.children[0].style.width = (progressBar.getAttribute("aria-valuenow") / progressBar.getAttribute("aria-valuemax") * 100).toFixed(2) + "%"
+          }
+        });
       }
-      
-      const app_exts = ["zip","har","app"]
-      caches.keys()
-      .then(keys => {
-        keys = keys.sort();
-        for (i = 0; i < keys.length; ++i) {
-          if (app_exts.indexOf(keys[i].split(".").slice(-1)[0].toLowerCase()) == -1) continue
-          document.body.appendChild(document.createElement('br'));
-          var img = document.createElement("img");
-          img.src = keys[i] + "/favicon.ico";
-          img.style = "width:16px;height:16px";
-          document.body.appendChild(img);
-          document.body.appendChild(document.createTextNode(' '));
-          let a = document.createElement("a");
-          a.href = keys[i] + "/";
-          a.innerText = keys[i];
-          document.body.appendChild(a);
-          document.body.appendChild(document.createTextNode(' '));
-          let a2 = document.createElement("a");
-          a2.href = keys[i];
-          a2.innerText = "delete";
-          a2.style = "float:right";
-          a2.onclick = (e) => {e.preventDefault();fetch(e.target.href,{method:"DELETE"}).then(() => window.location.reload())}
-          document.body.appendChild(a2);
-        }
-      })
     </script>
+    <script>
+      function addAppLoading(app,filesize,controller) {
+        var template = document.querySelector("template#app_loading");
+        var clone = document.importNode(template.content, true).firstElementChild;
+        clone.setAttribute("app",app);
+        clone.querySelector("#title").textContent = app;
+        var progressBar = clone.querySelector(".progress")
+        progressBar.setAttribute("aria-valuemax",filesize);
+        progressBar.children[0].style.width = "0%";
+        clone.querySelector("#cancel").addEventListener("click",function() {
+          controller.abort();
+          progressBar.children[0].classList.add("bg-danger")
+          fetch(app, {method: 'DELETE'})
+          .then(() => {
+            clone.classList.remove("show")
+            window.setTimeout(() => {
+              clone.remove();
+            },150)
+          });
+        },{once:true})
+        insertApp(clone,app);
+        return clone;
+      }
+      async function addAppRegular(app) {
+        var template = document.querySelector("template#app_regular");
+        var clone = document.importNode(template.content, true).firstElementChild;
+        clone.setAttribute("app",app);
+        clone.querySelector("#title").textContent = app;
+        clone.querySelector("#delete").href = app;
+        clone.querySelector("#delete").addEventListener("click",function(e) {
+          e.preventDefault()
+          fetch(this.href, {method: 'DELETE'})
+          .then(() => {
+            clone.classList.add("fade")
+            window.setTimeout(() => {
+              clone.remove();
+            },150)
+          });
+        },{once:true});
+        clone.querySelector("#icon").src = app + "/favicon.ico";
+        clone.querySelector("#more").href = "more?app=" + encodeURIComponent(app);
+        clone.querySelector("#download").href = app;
+        clone.querySelector("#install").href = app + "/.manifest.json";
+        clone.querySelector("#install").onclick = function(e) {
+          e.preventDefault();
+          installPrompt.prompt();
+        }
+        clone.querySelector("#open").href = app + "/";
+        insertApp(clone,app);
+        var manifest = await getManifest(app);
+        if (manifest) {
+          clone.querySelector("#title").textContent = manifest.name || manifest.short_name || app;
+          if (clone.querySelector("#title").textContent != app) clone.querySelector("#app").textContent = app;
+          clone.querySelector("#description").textContent = manifest.description || "";
+          if (manifest.start_url) clone.querySelector("#open").href = new URL(manifest.start_url,manifest.base);
+          if ('onbeforeinstallprompt' in window) clone.querySelector("#install").classList.remove("d-none");
+          clone.querySelector("#install").onclick = function(e) {
+            e.preventDefault();
+            document.head.insertAdjacentHTML("afterbegin",`<link rel="manifest" href="${manifest.base}"/>`);
+            setTimeout(() => {document.querySelector("link[rel='manifest']").remove()},1000) 
+          }
+          // TODO: Figure out how to do this on mobile
+        }
+        return clone;
+      }
+      async function getManifest(app) {
+        var manifest = await fetch(app + "/.manifest.json")
+        var redirect = true;
+        if (manifest?.ok) redirect = false;
+        if (!manifest?.ok) manifest = await fetch(app + "/manifest.json")
+        if (!manifest?.ok) manifest = await fetch(app + "/manifest.webmanifest")
+        var mainpage = !manifest.ok ? await fetch(app + "/").then(a => a.ok ? a.text() : null) : null;
+        if (mainpage) {
+          mainpage = (new DOMParser()).parseFromString(mainpage,"text/html");
+          mainpage.head.insertAdjacentHTML("afterbegin",`<base href="${app}/">`)
+          manifest = mainpage.querySelector("link[rel='manifest']")?.href;
+          if (manifest) manifest = await fetch(manifest)
+        }
+        if (manifest?.ok) {
+          if (redirect) {
+            var cache = await caches.open(app);
+            cache.put(new Request(app + "/.manifest.json"),Response.redirect(manifest.url));
+          }
+          var url = manifest.url;
+          manifest = await manifest.json();
+          manifest.base = url;
+          return manifest;
+        }
+      }
+      function insertApp(clone,app) {
+        var apps = document.querySelectorAll("#apps > div");
+        for (var i = 0; i <= apps.length; ++i) {
+          if (i == apps.length) {
+            document.querySelector("#apps").appendChild(clone)
+            break;
+          }
+          var app_i = apps[i].getAttribute("app")
+          if (app_i == app) {
+            apps[i].insertAdjacentElement('beforebegin',clone)
+            if (clone.querySelector(".progress")) apps[i].querySelector("#cancel")?.click();
+            apps[i].remove();
+            break;
+          }
+          if (app_i.toLowerCase() == app.toLowerCase()) {
+            if (app_i > app) {
+              apps[i].insertAdjacentElement("beforebegin",clone)
+              break;
+            } else {
+              continue;
+            }
+          }
+          if (app_i > app) {
+            apps[i].insertAdjacentElement("beforebegin",clone)
+            break;
+          }
+        }
+      }
+      async function loadApps() {
+        var keys = await caches.keys();
+        for (i = 0; i < keys.length; ++i) {
+          if (!keys[i].toLowerCase().endsWith(".zip") && !keys[i].toLowerCase().endsWith(".app") && !keys[i].toLowerCase().endsWith(".har")) continue
+          addAppRegular(decodeURI(keys[i]));
+        }
+      }
+      loadApps();
+
+      let installPrompt = null;
+
+      window.addEventListener("beforeinstallprompt", (event) => {
+        event.preventDefault();
+        event.prompt();
+      });
+
+      window.addEventListener("dragover", (e) => {
+        const fileItems = [...e.dataTransfer.items].filter(
+          (item) => item.kind === "file",
+        );
+        if (fileItems.length > 0) {
+          e.preventDefault();
+          if (fileItems.some((item) => ["application/x-zip-compressed",""].indexOf(item.type) != -1)) {
+            e.dataTransfer.dropEffect = "copy";
+          } else {
+            e.dataTransfer.dropEffect = "none";
+          }
+        }
+      });
+      window.addEventListener("drop", async (e) => {
+        e.preventDefault();
+        var registration = await navigator.serviceWorker?.ready;
+        [...e.dataTransfer.items].forEach(async item => {
+          if (["application/x-zip-compressed",""].indexOf(item.type) == -1) return;
+          var file = item.getAsFile();
+          var item = item.webkitGetAsEntry();
+          if (item?.isDirectory) {
+            var app = item.name;
+            if (!app.toLowerCase().endsWith(".app")) app += ".app";
+            const controller = new AbortController();
+            controller.id = Math.random().toString(16).slice(2);
+            controller.signal.onabort = () => {
+              registration.active.postMessage({action:"ABORT",controller:controller.id}) 
+            };
+            addAppLoading(app,1,controller);
+            await fetch(app, {method: 'PUT',headers:{"X-Zipjs-Pass-Through": 1,"X-Abort-Controller": controller.id},signal:controller.signal});
+            var files = await (async function entryToFiles(entry) {
+              var filename = entry.fullPath.slice(1);
+              if (filename.indexOf("/.") != -1) return [];
+              if (entry.isFile) {
+                filename = filename.split('/');
+                filename[0] = app;
+                filename = filename.join('/');
+                var file = await readFile(entry);
+                return [{file,filename}];
+              } else {
+                var reader = entry.createReader();
+                var files = [];
+                entries = await readEntries(reader);
+                while (entries.length > 0) {
+                  files.push(...entries.map(entryToFiles));
+                  entries = await readEntries(reader);
+                }
+                return [].concat(...await Promise.all(files));
+              }
+            })(item)
+            var appsize = files.reduce((acc,cur) => acc + cur.file.size,0);
+            var progressBar = document.querySelector(`[app="${app}"] .progress`);
+            progressBar.setAttribute("aria-valuemax",appsize);
+            var promises = files.map(({file,filename}) => fetch(filename, {
+              method: 'PUT',
+              headers:{
+                "Last-Modified": new Date(file.lastModified).toUTCString(), 
+                "Content-Type": file.type,
+                "X-Content-Length": file.size, // TODO: Write this info to a place you're allowed to put it (and put it back later)
+                "X-Abort-Controller": controller.id
+              },
+              signal:controller.signal,
+              body: file
+            }));
+            await Promise.all(promises).catch(() => {
+              document.querySelector(`[app="${app}"] .progress-bar`)?.classList.add("bg-danger")
+            })
+            registration.active.postMessage({action:"FINISH",controller:controller.id});
+            addAppRegular(app);
+          } else {
+            openFile(file);
+          }
+        });
+      });
+      function readEntries(reader) {
+        return new Promise((resolve, reject) => {
+          reader.readEntries(resolve, reject);
+        });
+      }
+      function readFile(entry,filename) {
+        return new Promise((resolve, reject) => {
+          entry.file(resolve, reject);
+        });
+      }
+    </script>
+    <script src="libs/bootstrap.bundle.min.js" crossorigin="anonymous"/>
   </body>
 </html>

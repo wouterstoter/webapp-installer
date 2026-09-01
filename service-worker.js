@@ -178,20 +178,29 @@ function wURL(url,base) {
       url = url.slice(1)
       base = base.slice(1)
     }
+    let protocol = shared.slice(-2);
+    if (protocol[0]?.endsWith(":") && !protocol[1]) {
+      url.unshift(...protocol)
+      base.unshift(...protocol)
+      shared = shared.slice(0,-2)
+    }
     var prefix = "";
-    if (base.length > 1 && shared.length > 3) {
+    if (url[0]?.endsWith(":") && !url[1]) {
+      if (url[0] == "https:") url[0] = "http:"
+      prefix = "";
+    } else if (base[0]?.endsWith(":") && !base[1]) {
+      prefix = "http://localhost/"
+    } else if (base.length > 1 && shared.length > 3) {
       prefix = "../".repeat(base.length - 1);
     } else if (base.length == 1 && shared.length > 3) {
       prefix = "./";
     } else if (shared.length > 3) {
       prefix = "";
-    } else if (shared.length == 2) {
+    } else if (shared.length == 3) {
       prefix = "/"
     } else if (shared.length == 2) {
       prefix = "//"
-    } else if (url[0] == "https:") (
-      url[0] = "http:"
-    )
+    }
     url = prefix + url.join("/") + search + hash;
 
     base = shared.concat(base);
@@ -202,14 +211,19 @@ function wURL(url,base) {
   let apppath = base.pathname.slice(BASE.pathname.length).split(AppExtRegEx)
   var last = apppath.pop();
   last = new URL(last,"http://localhost/");
-  last = new URL(url,last);
+  try {last = new URL(url,last);} catch(e) {last = new URL("http://localhost/")}
   if (last.username || last.password) {
     [base.username , base.password] = [last.username , last.password];
     last.username = last.password = "";
   }
   function validPath(path) {
       if (!/^[^\/]+:/.test(path)) return path;
-      let p = new URL(path.replace(/^https:/,"http:"),"http://localhost/");
+      let p
+      try {
+        p = new URL(path.replace(/^https:/,"http:"),"http://localhost/");
+      } catch(e) {
+        return ""
+      }
       if (p.username || p.password) {
           [base.username , base.password] = [p.username , p.password];
           p.username = p.password = ""

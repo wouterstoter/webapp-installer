@@ -508,36 +508,41 @@ async function request(input, options, navigate=false, client, signal) {
             if (entry.request.url.toLowerCase().startsWith("data:")) continue;
             if (!entry.response.status) continue;
             if (entry.request.method != "GET") continue;
-            entry.request.headers = entry.request.headers.reduce((a,b) => {if (b.name.startsWith(":")) return a; a[b.name.toLowerCase()] = b.value;return a},{})
-            if (entry._priority) entry.request.priority = ({high:"high",highest:"high",low:"low"})[entry._priority.toLowerCase()] || "auto";
-            if (entry.request.bodySize > 0) entry.request.headers["content-length"] = entry.request.bodySize;
-            delete entry.request.bodySize;
-            if (entry.request.postData?.text) {
-              entry.request.body = new Blob([entry.request.postData.text],{type: entry.request.postData.mimeType})
-              delete entry.request.postData
-            }
-            entry.request.url = wURL(entry.request.url,url.origin + url.pathname + "/");
-            entry.request = new Request(entry.request.url,entry.request);
-            entry.response.headers = entry.response.headers.reduce((a,b) => {if (b.name.startsWith(":")) return a; a[b.name.toLowerCase()] = b.value;return a},{})
-            if (entry.response.content?.text) {
-              entry.response.body = entry.response.content.text;
-              var decode = (entry.response.content.encoding || "").toLowerCase().split(" ").filter(a => a); // This is how the text is currently encoded
-              var encode = (entry.response.headers["content-encoding"] || "").toLowerCase().split(" ").filter(a => a); // This is how we want it to be encoded when saved
-              while (decode[0] && encode[0] && encode[0] == decode[0]) { // Everything that is the same doesn't have to be redone
-                decode.shift();
-                encode.shift();
+            try {
+              entry.request.headers = entry.request.headers.reduce((a,b) => {if (b.name.startsWith(":")) return a; a[b.name.toLowerCase()] = b.value;return a},{})
+              if (entry._priority) entry.request.priority = ({high:"high",highest:"high",low:"low"})[entry._priority.toLowerCase()] || "auto";
+              if (entry.request.bodySize > 0) entry.request.headers["content-length"] = entry.request.bodySize;
+              delete entry.request.bodySize;
+              if (entry.request.postData?.text) {
+                entry.request.body = new Blob([entry.request.postData.text],{type: entry.request.postData.mimeType})
+                delete entry.request.postData
               }
-              if (decode.length > 0) entry.response.body = (await rezipper(new Response(entry.response.body),new Headers({"content-encoding":decode.join(" ")}),true)).body;
-              if (encode.length > 0) entry.response.body = (await rezipper(new Response(entry.response.body),new Headers({"content-encoding":encode.join(" ")}),false)).body;
-              delete entry.response.content;
+              entry.request.url = wURL(entry.request.url,url.origin + url.pathname + "/");
+              entry.request = new Request(entry.request.url,entry.request);
+              entry.response.headers = entry.response.headers.reduce((a,b) => {if (b.name.startsWith(":")) return a; a[b.name.toLowerCase()] = b.value;return a},{})
+              if (entry.response.content?.text) {
+                entry.response.body = entry.response.content.text;
+                var decode = (entry.response.content.encoding || "").toLowerCase().split(" ").filter(a => a); // This is how the text is currently encoded
+                var encode = (entry.response.headers["content-encoding"] || "").toLowerCase().split(" ").filter(a => a); // This is how we want it to be encoded when saved
+                while (decode[0] && encode[0] && encode[0] == decode[0]) { // Everything that is the same doesn't have to be redone
+                  decode.shift();
+                  encode.shift();
+                }
+                if (decode.length > 0) entry.response.body = (await rezipper(new Response(entry.response.body),new Headers({"content-encoding":decode.join(" ")}),true)).body;
+                if (encode.length > 0) entry.response.body = (await rezipper(new Response(entry.response.body),new Headers({"content-encoding":encode.join(" ")}),false)).body;
+                delete entry.response.content;
+              }
+              if (entry.response.status == 304) entry.response.status = 200; // This just means we got the response from cache for the HAR
+              if (entry.response.status >= 300 && entry.response.status < 400 && entry.response.redirectURL) {
+                entry.response.redirectURL = wURL(entry.response.redirectURL,entry.request.url);
+                entry.response = Response.redirect(entry.response.redirectURL,entry.response.status);
+              } else {
+                entry.response = new Response(entry.response.body,entry.response);
+              }
+              await new_cache.put(entry.request,entry.response);
+            } catch(e) {
+              console.warn(entry.request.url,e)
             }
-            if (entry.response.status >= 300 && entry.response.status < 400 && entry.response.redirectURL) {
-              entry.response.redirectURL = wURL(entry.response.redirectURL,entry.request.url);
-              entry.response = Response.redirect(entry.response.redirectURL,entry.response.status);
-            } else {
-              entry.response = new Response(entry.response.body,entry.response);
-            }
-            await new_cache.put(entry.request,entry.response);
           }
           if (exists) return new Response(null,{status:200,statusText:"OK",headers:{Location:url.href}})
           return new Response(null,{status:201,statusText:"Created",headers:{Location:url.href}})

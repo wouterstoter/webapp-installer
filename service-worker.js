@@ -475,19 +475,23 @@ async function request(input, options, navigate=false, client, signal) {
           var new_cache = await caches.open(new_app);
           if (!Number(input.headers.get("X-Zipjs-Pass-Through") || "0")) {
             const zipReader = new zip.ZipReaderStream({passThrough: true});
-            await new Promise(async (resolve,reject) => {
-              var left = 0;
-              for await (const entry of (stream.pipeThrough(zipReader))) {
-                if (entry.directory) continue;
-                if (entry.filename.startsWith(".") || entry.filename.indexOf("/.") != -1) continue
-                left++;
-                (entry => rezipper(entry,{onprogress,signal})
-                  .then(response => new_cache.put(BASE + new_app + "/" + entry.filename, response))
-                  .catch(e => console.warn(entry.filename,e))
-                  .finally(() => {left--; if (!left) resolve()})
-                )(entry)
-              }
-            })
+            var promises = [];
+            var limit = 100; // Limit the amount of promises that are processed simultaniously
+            function addPromise(promise) {
+                promises.push(promise);
+                const cleanup = () => promises.splice(promises.indexOf(promise),1);
+                promise.then(cleanup, cleanup)
+            }
+            for await (const entry of (stream.pipeThrough(zipReader))) {
+              if (entry.directory) continue;
+              if (entry.filename.startsWith(".") || entry.filename.indexOf("/.") != -1) continue
+              if (promises.length >= limit) await Promise.any(promises)
+              addPromise((entry => rezipper(entry,{onprogress,signal})
+                .then(response => new_cache.put(BASE + new_app + "/" + entry.filename, response))
+                .catch(e => console.warn(entry.filename,e))
+              )(entry))
+            }
+            await Promise.all(promises)
           }
           if (exists) return new Response(null,{status:200,statusText:"OK",headers:{Location:url.href}})
           return new Response(null,{status:201,statusText:"Created",headers:{Location:url.href}})

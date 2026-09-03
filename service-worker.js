@@ -645,7 +645,7 @@ async function errorpage(status,app) {
   if (status == 401 && !body) body = `<!DOCTYPE html><html><head>${authscript}</head><body></body></html>`;
   var headers = new Headers(response?.headers);
   headers.set("Content-Type","text/html");
-  headers.set("Content-Security-Policy", "child-src 'self'; connect-src 'self' http: https: blob:") // Prevent loading of external resources
+  headers.set("Content-Security-Policy", "child-src 'self' blob: data:; connect-src 'self' http: https: blob: data:") // Prevent loading of external resources
   headers.set("Referrer-Policy", "origin-when-cross-origin") // Prevent sharing the referrer externally
   return new Response(body,{status, statusText, headers})
 }
